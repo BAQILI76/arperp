@@ -1,16 +1,9 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   AreaChart, Area, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, Cell, PieChart, Pie, Line
 } from "recharts";
-import { createClient } from "@supabase/supabase-js";
-
-// ─── Supabase client ─────────────────────────────────────────────────────────
-const SUPA_URL = "https://siizcpwfwcyjomcjqvfl.supabase.co";
-const SUPA_KEY = "REMPLACE_PAR_TA_VRAIE_ANON_KEY"; // Dashboard → Settings → API → anon public
-const supabase = createClient(SUPA_URL, SUPA_KEY);
-// ─────────────────────────────────────────────────────────────────────────────
 
 /* ═══════════════════════════════════════════════════════════
    DESIGN TOKENS
@@ -3268,95 +3261,6 @@ export default function App() {
   const [charges,  setCharges]  = useState(INIT_CHARGES);
   const [roles,    setRoles]    = useState(ROLES);
 
-  // ─── Supabase : chargement initial ─────────────────────────────────────────
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [{ data: c }, { data: cl }, { data: ch }] = await Promise.all([
-          supabase.from("contrats").select("*").order("created_at", { ascending: false }),
-          supabase.from("clients").select("*"),
-          supabase.from("charges").select("*"),
-        ]);
-        // Rehydrate echeances depuis les modalites sauvegardées
-        if (c && c.length > 0)
-          setContrats(c.map(row => ({
-            ...row,
-            modalites: row.modalites || {},
-            echeances: mkEcheances({ ...row, modalites: row.modalites || {} }),
-          })));
-        if (cl && cl.length > 0) setClients(cl);
-        if (ch && ch.length > 0) setCharges(ch);
-      } catch (e) {
-        // Supabase indisponible → données démo conservées silencieusement
-        console.warn("Supabase indisponible, mode local.", e);
-      }
-    };
-    load();
-  }, []);
-
-  // ─── Supabase : helpers de sauvegarde (fire-and-forget) ────────────────────
-  const saveContrat = async (contrat) => {
-    try {
-      const { echeances, ...payload } = contrat; // echeances est calculé, pas stocké
-      if (payload.id && typeof payload.id === "string" && payload.id.includes("-")) {
-        // id UUID → update
-        await supabase.from("contrats").update(payload).eq("id", payload.id);
-      } else {
-        // id numérique (nid()) → insert
-        const { id: _drop, ...insertPayload } = payload;
-        await supabase.from("contrats").insert([insertPayload]);
-      }
-    } catch (e) { console.warn("Supabase saveContrat:", e); }
-  };
-
-  const saveClient = async (client) => {
-    try {
-      const { id: _drop, ...payload } = client;
-      await supabase.from("clients").insert([payload]);
-    } catch (e) { console.warn("Supabase saveClient:", e); }
-  };
-
-  const saveCharge = async (charge) => {
-    try {
-      const { id: _drop, ...payload } = charge;
-      await supabase.from("charges").insert([payload]);
-    } catch (e) { console.warn("Supabase saveCharge:", e); }
-  };
-
-  // Wrappers setState qui font aussi la sync Supabase en arrière-plan
-  const setContratsSync = (updater) => {
-    setContrats(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      // Detecte le contrat ajouté ou modifié et le sauvegarde
-      const added = next.find(c => !prev.some(p => p.id === c.id));
-      if (added) { saveContrat(added); }
-      else {
-        const changed = next.find((c, i) => JSON.stringify(c) !== JSON.stringify(prev.find(p => p.id === c.id)));
-        if (changed) saveContrat(changed);
-      }
-      return next;
-    });
-  };
-
-  const setClientsSync = (updater) => {
-    setClients(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const added = next.find(c => !prev.some(p => p.id === c.id));
-      if (added) saveClient(added);
-      return next;
-    });
-  };
-
-  const setChargesSync = (updater) => {
-    setCharges(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const added = next.find(c => !prev.some(p => p.id === c.id));
-      if (added) saveCharge(added);
-      return next;
-    });
-  };
-  // ───────────────────────────────────────────────────────────────────────────
-
   const handleLogin = (roleId) => {
     setRole(roleId);
     setTab(roles[roleId].tabs[0]);
@@ -3466,21 +3370,21 @@ export default function App() {
           {(tab==="dashboard"||tab==="dashboard_raf")&&
             <PageDashboard contrats={contrats} clients={clients} charges={charges} role={role}/>}
           {tab==="contrats"&&
-            <PageContrats contrats={contrats} setContrats={setContratsSync} clients={clients} charges={charges}/>}
+            <PageContrats contrats={contrats} setContrats={setContrats} clients={clients} charges={charges}/>}
           {tab==="facturation"&&
-            <PageFacturation contrats={contrats} setContrats={setContratsSync} clients={clients}/>}
+            <PageFacturation contrats={contrats} setContrats={setContrats} clients={clients}/>}
           {tab==="technique"&&
-            <PageTechnique contrats={contrats} setContrats={setContratsSync} roleId={role} roles={roles}/>}
+            <PageTechnique contrats={contrats} setContrats={setContrats} roleId={role} roles={roles}/>}
           {tab==="previsionnel"&&
             <PagePrevisionnel contrats={contrats} charges={charges}/>}
           {tab==="clients"&&
-            <PageClients clients={clients} setClients={setClientsSync} contrats={contrats}/>}
+            <PageClients clients={clients} setClients={setClients} contrats={contrats}/>}
           {tab==="charges"&&
-            <PageCharges charges={charges} setCharges={setChargesSync}/>}
+            <PageCharges charges={charges} setCharges={setCharges}/>}
           {tab==="rentabilite"&&
             <PageRentabilite contrats={contrats} charges={charges} roles={roles}/>}
           {tab==="admin"&&
-            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContratsSync}/>}
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}/>}
         </div>
       </div>
     </>
