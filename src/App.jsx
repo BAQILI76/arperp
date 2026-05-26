@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   AreaChart, Area, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -566,7 +566,7 @@ function PageDashboard({contrats, clients, charges, role}) {
               <div>
                 <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}>
                   <Tag c={e.couleur} sm>{e.key}</Tag>
-                  <span style={{fontSize:11,color:T.text}}>{e.cNom.split(" ").slice(0,2).join(" ")}</span>
+                  <span style={{fontSize:11,color:T.text}}>{(e.cNom||"").split(" ").slice(0,2).join(" ")}</span>
                 </div>
                 <div style={{fontSize:10,color:T.dim}}>Paiement : {e.date_paiement}</div>
               </div>
@@ -605,8 +605,8 @@ function HonorairesInput({value, onChange}) {
   };
 
   // Sync raw when value is set externally (e.g. editing existing contract)
-  // eslint-disable-next-line
-  useState(()=>{ if(value) setRaw(String(value)); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(value) setRaw(String(value)); },[]);
 
   const displayVal = focused ? raw : formatNum(raw);
 
@@ -1714,7 +1714,7 @@ function PageFacturation({contrats, setContrats, clients}) {
                   onMouseOut={ev=>ev.currentTarget.style.background=e.paiement_recu?`${T.green}04`:"transparent"}>
                   <td style={{padding:"9px 13px"}}>
                     <div style={{fontSize:10,color:T.goldDk,fontFamily:"'JetBrains Mono',monospace"}}>{e.contrat.ref}</div>
-                    <div style={{fontSize:12,color:T.text}}>{e.contrat.nom.split(" ").slice(0,3).join(" ")}</div>
+                    <div style={{fontSize:12,color:T.text}}>{(e.contrat.nom||"").split(" ").slice(0,3).join(" ")}</div>
                   </td>
                   <td style={{padding:"9px 13px",fontSize:12,color:T.sub}}>{e.client?.nom.split(" ").slice(0,2).join(" ")||"—"}</td>
                   <td style={{padding:"9px 13px"}}><Tag c={e.couleur}>{e.key}</Tag></td>
@@ -1753,7 +1753,7 @@ function PageFacturation({contrats, setContrats, clients}) {
                 <div style={{fontSize:12,color:"#666"}}>Architecte DPLG · Membre de l'OAT</div>
               </div>
               <div style={{textAlign:"right"}}>
-                <div style={{fontSize:11,color:"#C8A84B",fontFamily:"monospace",fontWeight:700,fontSize:18}}>
+                <div style={{fontSize:18,color:"#C8A84B",fontFamily:"monospace",fontWeight:700}}>
                   FACTURE
                 </div>
                 <div style={{fontSize:11,color:"#666",marginTop:4}}>{preview.contrat.ref}-{preview.key}</div>
@@ -3108,7 +3108,7 @@ function PageClients({clients, setClients, contrats}) {
                 <div style={{width:38,height:38,background:`${col}18`,border:`1px solid ${col}35`,
                   borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",
                   fontSize:16,color:col,fontFamily:"'Inter',sans-serif",fontWeight:700}}>
-                  {c.nom.charAt(0)}
+                  {(c.nom||"?").charAt(0)}
                 </div>
                 <Tag c={col}>{c.type}</Tag>
               </div>
