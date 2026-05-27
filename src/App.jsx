@@ -3542,10 +3542,26 @@ export default function App() {
           </div>
 
           {/* Déconnexion */}
-          <button onClick={() => {
-            if (window.confirm("Confirmer la déconnexion ?\n\nToutes vos données sont enregistrées automatiquement.")) {
-              handleLogout();
-            }
+          <button onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            // Overlay de confirmation injecté directement dans le DOM
+            const overlay = document.createElement('div');
+            overlay.id = 'logout-confirm-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;';
+            overlay.innerHTML = `
+              <div style="background:#17171B;border:1px solid #3A3A46;border-radius:12px;padding:2rem;max-width:380px;width:90%;font-family:Inter,sans-serif;">
+                <div style="font-size:11px;color:#D4A84B;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;">Confirmation</div>
+                <div style="font-size:16px;color:#F5F4F9;font-weight:500;margin-bottom:8px;">Se déconnecter ?</div>
+                <div style="font-size:14px;color:#9090A8;margin-bottom:24px;line-height:1.6;">Toutes vos données sont enregistrées automatiquement.</div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                  <button id="logout-cancel" style="padding:9px 18px;border-radius:8px;border:1px solid #26262E;background:transparent;color:#9090A8;font-size:14px;cursor:pointer;font-family:inherit;">Annuler</button>
+                  <button id="logout-confirm" style="padding:9px 18px;border-radius:8px;border:none;background:#D4A84B;color:#0C0C0E;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">Confirmer</button>
+                </div>
+              </div>`;
+            document.body.appendChild(overlay);
+            document.getElementById('logout-cancel').onclick = () => overlay.remove();
+            document.getElementById('logout-confirm').onclick = () => { overlay.remove(); handleLogout(); };
           }} style={{margin:"10px 12px",padding:"9px",
             background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,
             color:T.dim,cursor:"pointer",fontSize:11,fontFamily:"'JetBrains Mono',monospace",
