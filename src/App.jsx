@@ -1,9 +1,18 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   AreaChart, Area, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, Cell, PieChart, Pie, Line
 } from "recharts";
+import { createClient } from "@supabase/supabase-js";
+
+/* ═══════════════════════════════════════════════════════════
+   SUPABASE CLIENT
+═══════════════════════════════════════════════════════════ */
+const sb = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 /* ═══════════════════════════════════════════════════════════
    DESIGN TOKENS
@@ -3256,10 +3265,100 @@ const TABS_CONFIG = {
 export default function App() {
   const [role,     setRole]     = useState(null);
   const [tab,      setTab]      = useState(null);
-  const [contrats, setContrats] = useState(INIT_CONTRATS);
-  const [clients,  setClients]  = useState(INIT_CLIENTS);
-  const [charges,  setCharges]  = useState(INIT_CHARGES);
+  const [contrats, setContrats] = useState([]);
+  const [clients,  setClients]  = useState([]);
+  const [charges,  setCharges]  = useState([]);
   const [roles,    setRoles]    = useState(ROLES);
+  const [loading,  setLoading]  = useState(true);
+  const [dbError,  setDbError]  = useState(null);
+  // Ref pour éviter les sauvegardes pendant le chargement initial
+  const initialized = useRef(false);
+
+  /* ── CHARGEMENT INITIAL DEPUIS SUPABASE ────────────────── */
+  useEffect(() => {
+    async function load() {
+      try {
+        const [{ data: ct, error: eCt }, { data: cl, error: eCl },
+               { data: ch, error: eCh }, { data: ro, error: eRo }] = await Promise.all([
+          sb.from("contrats").select("*").order("created_at", { ascending: true }),
+          sb.from("clients").select("*").order("created_at",  { ascending: true }),
+          sb.from("charges").select("*").order("created_at",  { ascending: true }),
+          sb.from("roles").select("*"),
+        ]);
+
+        if (eCt || eCl || eCh) {
+          // Tables vides ou erreur réseau → données démo
+          console.warn("Supabase load warning:", eCt || eCl || eCh);
+          setContrats(INIT_CONTRATS);
+          setClients(INIT_CLIENTS);
+          setCharges(INIT_CHARGES);
+        } else {
+          setContrats(ct?.length ? ct.map(r => r.data ?? r) : INIT_CONTRATS);
+          setClients( cl?.length ? cl.map(r => r.data ?? r) : INIT_CLIENTS);
+          setCharges( ch?.length ? ch.map(r => r.data ?? r) : INIT_CHARGES);
+        }
+
+        // Rôles — fusionner DB avec les rôles locaux (PIN + noms modifiés)
+        if (ro?.length && !eRo) {
+          const rolesObj = { ...ROLES };
+          ro.forEach(r => {
+            const d = r.data ?? r;
+            if (rolesObj[d.id]) rolesObj[d.id] = { ...rolesObj[d.id], ...d };
+          });
+          setRoles(rolesObj);
+        }
+      } catch (err) {
+        console.error("Supabase connection error:", err);
+        setDbError("Mode hors-ligne — données en mémoire uniquement.");
+        setContrats(INIT_CONTRATS);
+        setClients(INIT_CLIENTS);
+        setCharges(INIT_CHARGES);
+      } finally {
+        setLoading(false);
+        // Petit délai pour que les setState ci-dessus soient appliqués
+        // avant que les useEffect de sauvegarde ne s'activent
+        setTimeout(() => { initialized.current = true; }, 200);
+      }
+    }
+    load();
+  }, []);
+
+  /* ── SAUVEGARDE AUTOMATIQUE ────────────────────────────── */
+  // Sauvegarde chaque contrat modifié (upsert = insert ou update sur clé id)
+  useEffect(() => {
+    if (!initialized.current) return;
+    if (!contrats.length) return;
+    contrats.forEach(c => {
+      sb.from("contrats").upsert({ id: String(c.id), data: c }, { onConflict: "id" })
+        .then(({ error }) => { if (error) console.error("Contrat save:", error); });
+    });
+  }, [contrats]);
+
+  useEffect(() => {
+    if (!initialized.current) return;
+    if (!clients.length) return;
+    clients.forEach(c => {
+      sb.from("clients").upsert({ id: String(c.id), data: c }, { onConflict: "id" })
+        .then(({ error }) => { if (error) console.error("Client save:", error); });
+    });
+  }, [clients]);
+
+  useEffect(() => {
+    if (!initialized.current) return;
+    if (!charges.length) return;
+    charges.forEach(c => {
+      sb.from("charges").upsert({ id: String(c.id), data: c }, { onConflict: "id" })
+        .then(({ error }) => { if (error) console.error("Charge save:", error); });
+    });
+  }, [charges]);
+
+  useEffect(() => {
+    if (!initialized.current) return;
+    Object.values(roles).forEach(r => {
+      sb.from("roles").upsert({ id: r.id, data: r }, { onConflict: "id" })
+        .then(({ error }) => { if (error) console.error("Role save:", error); });
+    });
+  }, [roles]);
 
   const handleLogin = (roleId) => {
     setRole(roleId);
@@ -3268,9 +3367,39 @@ export default function App() {
 
   const handleLogout = () => { setRole(null); setTab(null); };
 
+  /* ── ÉCRAN DE CHARGEMENT ───────────────────────────────── */
+  if (loading) return (
+    <>
+      <style>{GFONT}</style><style>{CSS}</style>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",
+        height:"100vh",background:T.bg,flexDirection:"column",gap:20}}>
+        <div style={{fontSize:24,fontFamily:"'Inter',sans-serif",fontWeight:700,letterSpacing:"-.02em"}}>
+          Arc<span style={{color:T.gold}}>ERP</span>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{width:7,height:7,borderRadius:"50%",background:T.gold,
+              animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:T.dim,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".12em"}}>
+          CONNEXION BASE DE DONNÉES...
+        </div>
+      </div>
+    </>
+  );
+
   if(!role) return (
     <>
       <style>{GFONT}</style><style>{CSS}</style>
+      {dbError&&(
+        <div style={{position:"fixed",bottom:16,left:"50%",transform:"translateX(-50%)",
+          background:`${T.orange}18`,border:`1px solid ${T.orange}50`,borderRadius:6,
+          padding:"7px 16px",fontSize:11,color:T.orange,fontFamily:"'JetBrains Mono',monospace",
+          zIndex:9999,whiteSpace:"nowrap"}}>
+          ⚠ {dbError}
+        </div>
+      )}
       <LoginScreen onLogin={handleLogin}/>
     </>
   );
