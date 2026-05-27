@@ -172,7 +172,7 @@ const mkEcheances = (contrat) => {
 /* ═══════════════════════════════════════════════════════════
    DONNÉES DÉMO
 ═══════════════════════════════════════════════════════════ */
-const INIT_CLIENTS = []; // Données chargées depuis Supabase uniquement
+const INIT_CLIENTS = [];
 
 const mk = (clientId,ref,nom,type,honoraires,dateDebut,overrides={}) => ({
   id:nid(), ref, nom, clientId, type, honoraires,
@@ -183,7 +183,7 @@ const mk = (clientId,ref,nom,type,honoraires,dateDebut,overrides={}) => ({
   echeances:mkEcheances({date_debut:dateDebut,honoraires,delai_paiement:14,modalites:overrides}),
 });
 
-const INIT_CONTRATS = []; // Données chargées depuis Supabase uniquement
+const INIT_CONTRATS = [];
 
 const INIT_CHARGES = [
   {id:1,cat:"Loyer bureau",   mnt:2800, per:"Mensuel",desc:"Bureaux centre-ville"},
