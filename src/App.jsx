@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   AreaChart, Area, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -3265,14 +3265,111 @@ const TABS_CONFIG = {
 export default function App() {
   const [role,     setRole]     = useState(null);
   const [tab,      setTab]      = useState(null);
-  const [contrats, setContrats] = useState([]);
-  const [clients,  setClients]  = useState([]);
-  const [charges,  setCharges]  = useState([]);
-  const [roles,    setRoles]    = useState(ROLES);
-  const [loading,  setLoading]  = useState(true);
-  const [dbError,  setDbError]  = useState(null);
-  // Ref pour éviter les sauvegardes pendant le chargement initial
-  const initialized = useRef(false);
+  const [contrats, _setContrats] = useState([]);
+  const [clients,  _setClients]  = useState([]);
+  const [charges,  _setCharges]  = useState([]);
+  const [roles,    _setRoles]    = useState(ROLES);
+  const [loading,  setLoading]   = useState(true);
+  const [dbError,  setDbError]   = useState(null);
+
+  /* ══════════════════════════════════════════════════════════
+     WRAPPERS ÉCRITURE : setState + upsert Supabase simultanés
+     Chaque composant enfant reçoit ces fonctions à la place
+     des setters bruts. L'écriture en DB est directe et
+     immédiate — pas de useEffect intermédiaire.
+  ══════════════════════════════════════════════════════════ */
+
+  // Upsert un seul objet dans une table Supabase
+  const sbUpsert = (table, obj) => {
+    sb.from(table)
+      .upsert({ id: String(obj.id), data: obj }, { onConflict: "id" })
+      .then(({ error }) => { if (error) console.error(`${table} save:`, error, obj); });
+  };
+
+  // Supprime un enregistrement dans Supabase
+  const sbDelete = (table, id) => {
+    sb.from(table)
+      .delete()
+      .eq("id", String(id))
+      .then(({ error }) => { if (error) console.error(`${table} delete:`, error); });
+  };
+
+  // setContrats : accepte une valeur ou une fonction updater (comme useState)
+  // Après chaque mise à jour, upsert les contrats créés/modifiés et supprime ceux effacés
+  const setContrats = (updaterOrValue) => {
+    _setContrats(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+
+      // Détecter les contrats supprimés → delete dans Supabase
+      const prevIds = new Set(prev.map(c => String(c.id)));
+      const nextIds = new Set(next.map(c => String(c.id)));
+      prevIds.forEach(id => {
+        if (!nextIds.has(id)) sbDelete("contrats", id);
+      });
+
+      // Upsert les contrats nouveaux ou modifiés
+      next.forEach(c => {
+        const prevC = prev.find(p => String(p.id) === String(c.id));
+        // Nouveau contrat ou contrat modifié (comparaison rapide par JSON)
+        if (!prevC || JSON.stringify(prevC) !== JSON.stringify(c)) {
+          sbUpsert("contrats", c);
+        }
+      });
+
+      return next;
+    });
+  };
+
+  const setClients = (updaterOrValue) => {
+    _setClients(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+      const prevIds = new Set(prev.map(c => String(c.id)));
+      const nextIds = new Set(next.map(c => String(c.id)));
+      prevIds.forEach(id => { if (!nextIds.has(id)) sbDelete("clients", id); });
+      next.forEach(c => {
+        const prevC = prev.find(p => String(p.id) === String(c.id));
+        if (!prevC || JSON.stringify(prevC) !== JSON.stringify(c)) sbUpsert("clients", c);
+      });
+      return next;
+    });
+  };
+
+  const setCharges = (updaterOrValue) => {
+    _setCharges(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+      const prevIds = new Set(prev.map(c => String(c.id)));
+      const nextIds = new Set(next.map(c => String(c.id)));
+      prevIds.forEach(id => { if (!nextIds.has(id)) sbDelete("charges", id); });
+      next.forEach(c => {
+        const prevC = prev.find(p => String(p.id) === String(c.id));
+        if (!prevC || JSON.stringify(prevC) !== JSON.stringify(c)) sbUpsert("charges", c);
+      });
+      return next;
+    });
+  };
+
+  const setRoles = (updaterOrValue) => {
+    _setRoles(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+      Object.values(next).forEach(r => {
+        const prevR = prev[r.id];
+        if (!prevR || JSON.stringify(prevR) !== JSON.stringify(r)) {
+          sb.from("roles")
+            .upsert({ id: r.id, data: r }, { onConflict: "id" })
+            .then(({ error }) => { if (error) console.error("Role save:", error); });
+        }
+      });
+      return next;
+    });
+  };
 
   /* ── CHARGEMENT INITIAL DEPUIS SUPABASE ────────────────── */
   useEffect(() => {
@@ -3286,79 +3383,36 @@ export default function App() {
           sb.from("roles").select("*"),
         ]);
 
-        if (eCt || eCl || eCh) {
-          // Tables vides ou erreur réseau → données démo
-          console.warn("Supabase load warning:", eCt || eCl || eCh);
-          setContrats(INIT_CONTRATS);
-          setClients(INIT_CLIENTS);
-          setCharges(INIT_CHARGES);
-        } else {
-          setContrats(ct?.length ? ct.map(r => r.data ?? r) : INIT_CONTRATS);
-          setClients( cl?.length ? cl.map(r => r.data ?? r) : INIT_CLIENTS);
-          setCharges( ch?.length ? ch.map(r => r.data ?? r) : INIT_CHARGES);
-        }
+        if (eCt) { console.warn("Contrats load error:", eCt); }
+        if (eCl) { console.warn("Clients load error:",  eCl); }
+        if (eCh) { console.warn("Charges load error:",  eCh); }
 
-        // Rôles — fusionner DB avec les rôles locaux (PIN + noms modifiés)
-        if (ro?.length && !eRo) {
+        // Chargement direct avec _set* pour ne PAS déclencher d'upsert
+        // (les données viennent déjà de la DB, inutile de les réécrire)
+        _setContrats(!eCt && ct?.length ? ct.map(r => r.data ?? r) : INIT_CONTRATS);
+        _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : INIT_CLIENTS);
+        _setCharges( !eCh && ch?.length ? ch.map(r => r.data ?? r) : INIT_CHARGES);
+
+        if (!eRo && ro?.length) {
           const rolesObj = { ...ROLES };
           ro.forEach(r => {
             const d = r.data ?? r;
             if (rolesObj[d.id]) rolesObj[d.id] = { ...rolesObj[d.id], ...d };
           });
-          setRoles(rolesObj);
+          _setRoles(rolesObj);
         }
       } catch (err) {
         console.error("Supabase connection error:", err);
         setDbError("Mode hors-ligne — données en mémoire uniquement.");
-        setContrats(INIT_CONTRATS);
-        setClients(INIT_CLIENTS);
-        setCharges(INIT_CHARGES);
+        _setContrats(INIT_CONTRATS);
+        _setClients(INIT_CLIENTS);
+        _setCharges(INIT_CHARGES);
       } finally {
         setLoading(false);
-        // Petit délai pour que les setState ci-dessus soient appliqués
-        // avant que les useEffect de sauvegarde ne s'activent
-        setTimeout(() => { initialized.current = true; }, 200);
       }
     }
     load();
   }, []);
-
-  /* ── SAUVEGARDE AUTOMATIQUE ────────────────────────────── */
-  // Sauvegarde chaque contrat modifié (upsert = insert ou update sur clé id)
-  useEffect(() => {
-    if (!initialized.current) return;
-    if (!contrats.length) return;
-    contrats.forEach(c => {
-      sb.from("contrats").upsert({ id: String(c.id), data: c }, { onConflict: "id" })
-        .then(({ error }) => { if (error) console.error("Contrat save:", error); });
-    });
-  }, [contrats]);
-
-  useEffect(() => {
-    if (!initialized.current) return;
-    if (!clients.length) return;
-    clients.forEach(c => {
-      sb.from("clients").upsert({ id: String(c.id), data: c }, { onConflict: "id" })
-        .then(({ error }) => { if (error) console.error("Client save:", error); });
-    });
-  }, [clients]);
-
-  useEffect(() => {
-    if (!initialized.current) return;
-    if (!charges.length) return;
-    charges.forEach(c => {
-      sb.from("charges").upsert({ id: String(c.id), data: c }, { onConflict: "id" })
-        .then(({ error }) => { if (error) console.error("Charge save:", error); });
-    });
-  }, [charges]);
-
-  useEffect(() => {
-    if (!initialized.current) return;
-    Object.values(roles).forEach(r => {
-      sb.from("roles").upsert({ id: r.id, data: r }, { onConflict: "id" })
-        .then(({ error }) => { if (error) console.error("Role save:", error); });
-    });
-  }, [roles]);
 
   const handleLogin = (roleId) => {
     setRole(roleId);
