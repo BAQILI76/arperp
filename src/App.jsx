@@ -172,7 +172,12 @@ const mkEcheances = (contrat) => {
 /* ═══════════════════════════════════════════════════════════
    DONNÉES DÉMO
 ═══════════════════════════════════════════════════════════ */
-const INIT_CLIENTS = [];
+const INIT_CLIENTS = [
+  {id:1,code:"CLI-001",nom:"Groupe Méditerranée Invest", contact:"Ahmed Bensalem",  email:"a.bensalem@gmi.tn",   tel:"+216 71 234 567",ville:"Tunis",   type:"Promoteur"},
+  {id:2,code:"CLI-002",nom:"SCI Carthage Premium",        contact:"Nadia Chaibi",    email:"n.chaibi@sci-cp.com", tel:"+216 74 456 789",ville:"La Marsa",type:"Promoteur"},
+  {id:3,code:"CLI-003",nom:"Ministère des Équipements",   contact:"Karim Gharbi",    email:"k.gharbi@eq.gov.tn",  tel:"+216 71 890 123",ville:"Tunis",   type:"Public"},
+  {id:4,code:"CLI-004",nom:"Clinique Pasteur",            contact:"Dr. Slim Ayed",   email:"s.ayed@pasteur.tn",   tel:"+216 71 567 890",ville:"Sfax",    type:"Privé"},
+];
 
 const mk = (clientId,ref,nom,type,honoraires,dateDebut,overrides={}) => ({
   id:nid(), ref, nom, clientId, type, honoraires,
@@ -183,7 +188,26 @@ const mk = (clientId,ref,nom,type,honoraires,dateDebut,overrides={}) => ({
   echeances:mkEcheances({date_debut:dateDebut,honoraires,delai_paiement:14,modalites:overrides}),
 });
 
-const INIT_CONTRATS = [];
+const INIT_CONTRATS = [
+  mk(1,"CTR-2024-001","Résidence Les Jasmins","Résidentiel",185000,"2024-01-15",{
+    COMMANDE:{livree:true,date_livraison:"2024-01-15",paiement_recu:true,facture_emise:true,avancement:100},
+    ESQ:     {livree:true,date_livraison:"2024-01-30",paiement_recu:true,facture_emise:true,avancement:100},
+    APS:     {livree:true,date_livraison:"2024-02-25",paiement_recu:true,facture_emise:true,avancement:100},
+    APD:     {retard:2,livree:true,date_livraison:"2024-05-10",facture_emise:true,avancement:100},
+    PC:      {duree:3,avancement:60,notes_tech:"Dépôt PC en cours — DRE Tunis"},
+    PRO_DCE: {duree:7,avancement:15},
+  }),
+  mk(2,"CTR-2024-002","Centre Commercial Montplaisir","Commercial",320000,"2024-03-01",{
+    COMMANDE:{livree:true,date_livraison:"2024-03-01",paiement_recu:true,facture_emise:true,avancement:100},
+    ESQ:     {livree:true,date_livraison:"2024-03-14",paiement_recu:true,facture_emise:true,avancement:100},
+    APS:     {retard:3,livree:true,date_livraison:"2024-05-15",paiement_recu:true,facture_emise:true,avancement:100},
+    APD:     {duree:7,retard:1,avancement:35,notes_tech:"En attente validation client"},
+  }),
+  mk(4,"CTR-2025-001","Clinique Pasteur Extension","Santé",210000,"2025-02-01",{
+    COMMANDE:{livree:true,date_livraison:"2025-02-01",paiement_recu:true,facture_emise:true,avancement:100},
+    ESQ:     {duree:3,avancement:80,notes_tech:"Esquisse soumise — retour client attendu"},
+  }),
+];
 
 const INIT_CHARGES = [
   {id:1,cat:"Loyer bureau",   mnt:2800, per:"Mensuel",desc:"Bureaux centre-ville"},
@@ -3365,9 +3389,9 @@ export default function App() {
 
         // Chargement direct avec _set* pour ne PAS déclencher d'upsert
         // (les données viennent déjà de la DB, inutile de les réécrire)
-        _setContrats(!eCt && ct?.length ? ct.map(r => r.data ?? r) : []);
-        _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : []);
-        _setCharges( !eCh && ch?.length ? ch.map(r => r.data ?? r) : []);
+        _setContrats(!eCt && ct?.length ? ct.map(r => r.data ?? r) : INIT_CONTRATS);
+        _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : INIT_CLIENTS);
+        _setCharges( !eCh && ch?.length ? ch.map(r => r.data ?? r) : INIT_CHARGES);
 
         if (!eRo && ro?.length) {
           const rolesObj = { ...ROLES };
@@ -3379,7 +3403,10 @@ export default function App() {
         }
       } catch (err) {
         console.error("Supabase connection error:", err);
-        setDbError("Mode hors-ligne — impossible de joindre la base de données.");
+        setDbError("Mode hors-ligne — données en mémoire uniquement.");
+        _setContrats(INIT_CONTRATS);
+        _setClients(INIT_CLIENTS);
+        _setCharges(INIT_CHARGES);
       } finally {
         setLoading(false);
       }
