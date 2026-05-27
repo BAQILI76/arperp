@@ -3542,7 +3542,11 @@ export default function App() {
           </div>
 
           {/* Déconnexion */}
-          <button onClick={() => setShowLogoutConfirm(true)} style={{margin:"10px 12px",padding:"9px",
+          <button onClick={() => {
+            if (window.confirm("Confirmer la déconnexion ?\n\nToutes vos données sont enregistrées automatiquement.")) {
+              handleLogout();
+            }
+          }} style={{margin:"10px 12px",padding:"9px",
             background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,
             color:T.dim,cursor:"pointer",fontSize:11,fontFamily:"'JetBrains Mono',monospace",
             letterSpacing:".06em",transition:"all .15s"}}
