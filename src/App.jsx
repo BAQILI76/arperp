@@ -2346,9 +2346,23 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
 function PageAdmin({roles, setRoles, contrats, setContrats}) {
   const [editPin, setEditPin] = useState({});
   const [editNom, setEditNom] = useState({});
-  const [onglet, setOnglet]   = useState("acces"); // "acces" | "affectation"
+  const [onglet, setOnglet]   = useState("acces"); // "acces" | "affectation" | "journal"
+  const [journal, setJournal] = useState([]);
+  const [loadingJournal, setLoadingJournal] = useState(false);
 
   const cdps = Object.values(roles).filter(r=>r.isCdP);
+
+  // Charger le journal quand on ouvre l'onglet
+  useEffect(()=>{
+    if(onglet==="journal") {
+      setLoadingJournal(true);
+      sb.from("audit_log").select("*").order("created_at",{ascending:false}).limit(50)
+        .then(({data,error})=>{
+          if(!error && data) setJournal(data);
+          setLoadingJournal(false);
+        });
+    }
+  },[onglet]);
 
   const affecter = (contratId, cdpId) => {
     setContrats(prev=>prev.map(c=>c.id===contratId?{...c,cdpId:cdpId||null}:c));
@@ -2366,11 +2380,11 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
       {/* Onglets */}
       <div style={{display:"flex",gap:0,marginBottom:22,borderRadius:7,
         overflow:"hidden",border:`1px solid ${T.border}`,width:"fit-content"}}>
-        {[{id:"acces",label:"Profils & PINs"},{id:"affectation",label:"Affectation projets"}].map(o=>(
+        {[{id:"acces",label:"Profils & PINs"},{id:"affectation",label:"Affectation projets"},{id:"journal",label:"📋 Journal"}].map((o,i,arr)=>(
           <button key={o.id} onClick={()=>setOnglet(o.id)} style={{
             padding:"9px 22px",background:onglet===o.id?T.gold:T.surface,
             color:onglet===o.id?"#08080A":T.sub,border:"none",
-            borderRight:o.id==="acces"?`1px solid ${T.border}`:"none",
+            borderRight:i<arr.length-1?`1px solid ${T.border}`:"none",
             cursor:"pointer",fontSize:13,fontFamily:"'Inter',sans-serif",
             fontWeight:onglet===o.id?600:400,transition:"all .15s"
           }}>{o.label}</button>
@@ -2515,6 +2529,91 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
         que ses projets affectés. Les retards saisis remontent automatiquement au RAF (prévisionnel)
         et à l'Architecte (dashboard) sans exposer les données financières au service technique.
       </div>
+
+      {/* ─── ONGLET JOURNAL ─── */}
+      {onglet==="journal"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:12,color:T.sub}}>
+              Dernières <strong style={{color:T.text}}>50 actions</strong> enregistrées
+            </div>
+            <button onClick={()=>{
+              setLoadingJournal(true);
+              sb.from("audit_log").select("*").order("created_at",{ascending:false}).limit(50)
+                .then(({data})=>{ if(data) setJournal(data); setLoadingJournal(false); });
+            }} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:5,
+              color:T.sub,fontSize:11,padding:"5px 12px",cursor:"pointer",
+              fontFamily:"'JetBrains Mono',monospace"}}>↺ Actualiser</button>
+          </div>
+
+          {loadingJournal ? (
+            <div style={{textAlign:"center",padding:32,color:T.dim,fontSize:12,
+              fontFamily:"'JetBrains Mono',monospace"}}>Chargement...</div>
+          ) : journal.length === 0 ? (
+            <div style={{textAlign:"center",padding:32,color:T.dim,fontSize:12}}>
+              Aucune entrée dans le journal
+            </div>
+          ) : (
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,overflow:"hidden"}}>
+              {/* Header */}
+              <div style={{display:"grid",gridTemplateColumns:"160px 90px 1fr 120px",gap:10,
+                padding:"9px 16px",background:T.card2,borderBottom:`1px solid ${T.border}`}}>
+                {["Date & Heure","Profil","Action / Détail","Snapshot"].map(h=>(
+                  <div key={h} style={{fontSize:9,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
+                    letterSpacing:".06em",textTransform:"uppercase"}}>{h}</div>
+                ))}
+              </div>
+              {journal.map((entry,i)=>{
+                const snap = entry.snapshot ? (() => { try { return JSON.parse(entry.snapshot); } catch { return null; } })() : null;
+                const roleInfo = entry.role_id ? ROLES[entry.role_id] : null;
+                const d = new Date(entry.created_at);
+                const dateStr = d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});
+                const timeStr = d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+                const actionColor = entry.action==="LOGOUT"?T.orange:entry.action==="LOGIN"?T.green:T.blue;
+                return (
+                  <div key={entry.id||i} style={{
+                    display:"grid",gridTemplateColumns:"160px 90px 1fr 120px",gap:10,
+                    padding:"10px 16px",borderBottom:i<journal.length-1?`1px solid ${T.border}`:"none",
+                    alignItems:"center",transition:"background .15s"
+                  }}
+                  onMouseOver={e=>e.currentTarget.style.background=T.card2}
+                  onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                    {/* Date */}
+                    <div>
+                      <div style={{fontSize:12,color:T.text,fontFamily:"'JetBrains Mono',monospace"}}>{dateStr}</div>
+                      <div style={{fontSize:10,color:T.dim}}>{timeStr}</div>
+                    </div>
+                    {/* Profil */}
+                    <div>
+                      {roleInfo ? (
+                        <Tag c={roleInfo.couleur} sm>{roleInfo.label.split(" ")[0]}</Tag>
+                      ) : (
+                        <span style={{fontSize:11,color:T.dim}}>{entry.role_id||"—"}</span>
+                      )}
+                    </div>
+                    {/* Action */}
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                        <Tag c={actionColor} sm>{entry.action}</Tag>
+                        <span style={{fontSize:12,color:T.sub}}>{entry.details}</span>
+                      </div>
+                    </div>
+                    {/* Snapshot */}
+                    <div>
+                      {snap && (
+                        <div style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.5}}>
+                          {snap.contrats_count !== undefined && <div>{snap.contrats_count} contrat(s)</div>}
+                          {snap.clients_count  !== undefined && <div>{snap.clients_count} client(s)</div>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3419,7 +3518,23 @@ export default function App() {
     setTab(roles[roleId].tabs[0]);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Journal : enregistrer la déconnexion dans audit_log
+    try {
+      const snapshot = {
+        contrats_count: contrats.length,
+        clients_count:  clients.length,
+        charges_count:  charges.length,
+        contrats_ids:   contrats.map(c=>c.id),
+      };
+      await sb.from("audit_log").insert({
+        role_id:    role,
+        action:     "LOGOUT",
+        details:    `Déconnexion — ${contrats.length} contrats, ${clients.length} clients`,
+        snapshot:   JSON.stringify(snapshot),
+        created_at: new Date().toISOString(),
+      });
+    } catch(e) { console.warn("audit_log:", e.message); }
     sb.auth.signOut().catch(() => {});
     setRole(null);
     setTab(null);
@@ -3542,27 +3657,8 @@ export default function App() {
           </div>
 
           {/* Déconnexion */}
-          <button onClick={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            // Overlay de confirmation injecté directement dans le DOM
-            const overlay = document.createElement('div');
-            overlay.id = 'logout-confirm-overlay';
-            overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;';
-            overlay.innerHTML = `
-              <div style="background:#17171B;border:1px solid #3A3A46;border-radius:12px;padding:2rem;max-width:380px;width:90%;font-family:Inter,sans-serif;">
-                <div style="font-size:11px;color:#D4A84B;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;">Confirmation</div>
-                <div style="font-size:16px;color:#F5F4F9;font-weight:500;margin-bottom:8px;">Se déconnecter ?</div>
-                <div style="font-size:14px;color:#9090A8;margin-bottom:24px;line-height:1.6;">Toutes vos données sont enregistrées automatiquement.</div>
-                <div style="display:flex;gap:10px;justify-content:flex-end;">
-                  <button id="logout-cancel" style="padding:9px 18px;border-radius:8px;border:1px solid #26262E;background:transparent;color:#9090A8;font-size:14px;cursor:pointer;font-family:inherit;">Annuler</button>
-                  <button id="logout-confirm" style="padding:9px 18px;border-radius:8px;border:none;background:#D4A84B;color:#0C0C0E;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">Confirmer</button>
-                </div>
-              </div>`;
-            document.body.appendChild(overlay);
-            document.getElementById('logout-cancel').onclick = () => overlay.remove();
-            document.getElementById('logout-confirm').onclick = () => { overlay.remove(); handleLogout(); };
-          }} style={{margin:"10px 12px",padding:"9px",
+          <button onClick={() => setShowLogoutConfirm(true)}
+            style={{margin:"10px 12px",padding:"9px",
             background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,
             color:T.dim,cursor:"pointer",fontSize:11,fontFamily:"'JetBrains Mono',monospace",
             letterSpacing:".06em",transition:"all .15s"}}
@@ -3594,59 +3690,72 @@ export default function App() {
             <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}/>}
         </div>
       </div>
-    </>
-    {/* ── Modal confirmation déconnexion ── */}
-    {showLogoutConfirm && (
-      <div style={{
-        position:"fixed",inset:0,zIndex:9999,
-        background:"rgba(0,0,0,0.7)",
-        display:"flex",alignItems:"center",justifyContent:"center",
-        padding:"1rem",
-      }}>
+      {/* ── Modal confirmation déconnexion ── */}
+      {showLogoutConfirm && (
         <div style={{
-          background:"#17171B",border:"1px solid #3A3A46",
-          borderRadius:"12px",padding:"2rem",
-          width:"100%",maxWidth:"400px",
+          position:"fixed",inset:0,zIndex:99999,
+          background:"rgba(0,0,0,0.82)",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          padding:"1rem",animation:"fadeIn .15s ease",
         }}>
           <div style={{
-            fontSize:"12px",fontWeight:500,
-            color:"#D4A84B",marginBottom:"1rem",
-            letterSpacing:"0.05em",textTransform:"uppercase",
+            background:T.card,border:`1px solid ${T.borderHi}`,
+            borderRadius:12,padding:"28px 28px 24px",
+            width:"100%",maxWidth:400,
+            boxShadow:"0 24px 60px rgba(0,0,0,.6)",
           }}>
-            Confirmation
-          </div>
-          <h2 style={{fontSize:"16px",fontWeight:500,color:"#F5F4F9",margin:"0 0 0.5rem"}}>
-            Se déconnecter ?
-          </h2>
-          <p style={{fontSize:"14px",color:"#9090A8",margin:"0 0 1.5rem",lineHeight:1.6}}>
-            Voulez-vous quitter la session en cours ? Toutes vos données sont enregistrées automatiquement.
-          </p>
-          <div style={{display:"flex",gap:"10px",justifyContent:"flex-end"}}>
-            <button
-              onClick={() => setShowLogoutConfirm(false)}
-              style={{
-                padding:"9px 18px",borderRadius:"8px",
-                border:"1px solid #26262E",background:"transparent",
-                color:"#9090A8",fontSize:"14px",cursor:"pointer",
-                fontFamily:"inherit",
-              }}
-            >
-              Annuler
-            </button>
-            <button
-              onClick={() => { setShowLogoutConfirm(false); handleLogout(); }}
-              style={{
-                padding:"9px 18px",borderRadius:"8px",
-                border:"none",background:"#D4A84B",
-                color:"#0C0C0E",fontSize:"14px",fontWeight:600,
-                cursor:"pointer",fontFamily:"inherit",
-              }}
-            >
-              Confirmer la déconnexion
-            </button>
+            {/* Icône + titre */}
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+              <div style={{width:40,height:40,borderRadius:10,
+                background:`${T.red}15`,border:`1px solid ${T.red}30`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:18,flexShrink:0}}>⏻</div>
+              <div>
+                <div style={{fontSize:9,color:T.goldDk,fontFamily:"'JetBrains Mono',monospace",
+                  letterSpacing:".15em",textTransform:"uppercase",marginBottom:3}}>
+                  Confirmation requise
+                </div>
+                <div style={{fontSize:16,fontWeight:600,color:T.text,fontFamily:"'Inter',sans-serif"}}>
+                  Terminer la session ?
+                </div>
+              </div>
+            </div>
+
+            {/* Message */}
+            <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,
+              padding:"12px 14px",marginBottom:20}}>
+              <div style={{fontSize:12,color:T.sub,lineHeight:1.7}}>
+                ✓ Toutes vos modifications sont <span style={{color:T.green}}>sauvegardées automatiquement</span> dans Supabase.<br/>
+                ✓ Un journal de déconnexion sera enregistré.
+              </div>
+            </div>
+
+            {/* Rôle actif */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20,
+              padding:"8px 12px",borderRadius:6,background:`${T.border}40`}}>
+              <div style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>SESSION ACTIVE :</div>
+              <div style={{fontSize:12,color:T.gold,fontFamily:"'JetBrains Mono',monospace",fontWeight:500}}>
+                {role ? (ROLES[role]?.label || role) : "—"}
+              </div>
+            </div>
+
+            {/* Boutons */}
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowLogoutConfirm(false)} style={{
+                padding:"9px 20px",borderRadius:7,
+                border:`1px solid ${T.border}`,background:"transparent",
+                color:T.sub,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif",
+              }}>Annuler</button>
+              <button onClick={() => { setShowLogoutConfirm(false); handleLogout(); }} style={{
+                padding:"9px 20px",borderRadius:7,
+                border:"none",background:T.gold,
+                color:"#08080A",fontSize:13,fontWeight:600,
+                cursor:"pointer",fontFamily:"'Inter',sans-serif",
+              }}>⏻ Confirmer la déconnexion</button>
+            </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
+    </>
   );
 }
