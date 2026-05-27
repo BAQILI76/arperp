@@ -172,12 +172,7 @@ const mkEcheances = (contrat) => {
 /* ═══════════════════════════════════════════════════════════
    DONNÉES DÉMO
 ═══════════════════════════════════════════════════════════ */
-const INIT_CLIENTS = [
-  {id:1,code:"CLI-001",nom:"Groupe Méditerranée Invest", contact:"Ahmed Bensalem",  email:"a.bensalem@gmi.tn",   tel:"+216 71 234 567",ville:"Tunis",   type:"Promoteur"},
-  {id:2,code:"CLI-002",nom:"SCI Carthage Premium",        contact:"Nadia Chaibi",    email:"n.chaibi@sci-cp.com", tel:"+216 74 456 789",ville:"La Marsa",type:"Promoteur"},
-  {id:3,code:"CLI-003",nom:"Ministère des Équipements",   contact:"Karim Gharbi",    email:"k.gharbi@eq.gov.tn",  tel:"+216 71 890 123",ville:"Tunis",   type:"Public"},
-  {id:4,code:"CLI-004",nom:"Clinique Pasteur",            contact:"Dr. Slim Ayed",   email:"s.ayed@pasteur.tn",   tel:"+216 71 567 890",ville:"Sfax",    type:"Privé"},
-];
+const INIT_CLIENTS = [];
 
 const mk = (clientId,ref,nom,type,honoraires,dateDebut,overrides={}) => ({
   id:nid(), ref, nom, clientId, type, honoraires,
@@ -188,26 +183,7 @@ const mk = (clientId,ref,nom,type,honoraires,dateDebut,overrides={}) => ({
   echeances:mkEcheances({date_debut:dateDebut,honoraires,delai_paiement:14,modalites:overrides}),
 });
 
-const INIT_CONTRATS = [
-  mk(1,"CTR-2024-001","Résidence Les Jasmins","Résidentiel",185000,"2024-01-15",{
-    COMMANDE:{livree:true,date_livraison:"2024-01-15",paiement_recu:true,facture_emise:true,avancement:100},
-    ESQ:     {livree:true,date_livraison:"2024-01-30",paiement_recu:true,facture_emise:true,avancement:100},
-    APS:     {livree:true,date_livraison:"2024-02-25",paiement_recu:true,facture_emise:true,avancement:100},
-    APD:     {retard:2,livree:true,date_livraison:"2024-05-10",facture_emise:true,avancement:100},
-    PC:      {duree:3,avancement:60,notes_tech:"Dépôt PC en cours — DRE Tunis"},
-    PRO_DCE: {duree:7,avancement:15},
-  }),
-  mk(2,"CTR-2024-002","Centre Commercial Montplaisir","Commercial",320000,"2024-03-01",{
-    COMMANDE:{livree:true,date_livraison:"2024-03-01",paiement_recu:true,facture_emise:true,avancement:100},
-    ESQ:     {livree:true,date_livraison:"2024-03-14",paiement_recu:true,facture_emise:true,avancement:100},
-    APS:     {retard:3,livree:true,date_livraison:"2024-05-15",paiement_recu:true,facture_emise:true,avancement:100},
-    APD:     {duree:7,retard:1,avancement:35,notes_tech:"En attente validation client"},
-  }),
-  mk(4,"CTR-2025-001","Clinique Pasteur Extension","Santé",210000,"2025-02-01",{
-    COMMANDE:{livree:true,date_livraison:"2025-02-01",paiement_recu:true,facture_emise:true,avancement:100},
-    ESQ:     {duree:3,avancement:80,notes_tech:"Esquisse soumise — retour client attendu"},
-  }),
-];
+const INIT_CONTRATS = [];
 
 const INIT_CHARGES = [
   {id:1,cat:"Loyer bureau",   mnt:2800, per:"Mensuel",desc:"Bureaux centre-ville"},
@@ -3239,55 +3215,414 @@ function PageCharges({charges, setCharges}) {
         </Modal>
       )}
     </div>
+  );
+}
 
-    {/* ── Modal modifications non sauvegardées ── */}
-    {showUnsavedAlert && (
+
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR PAR RÔLE
+═══════════════════════════════════════════════════════════ */
+const TABS_CONFIG = {
+  dashboard:    {label:"Dashboard",       icon:"◈"},
+  dashboard_raf:{label:"Dashboard",       icon:"◈"},
+  contrats:     {label:"Contrats & BC",   icon:"⬜"},
+  facturation:  {label:"Facturation",     icon:"◻"},
+  technique:    {label:"Suivi Technique", icon:"⬡"},
+  previsionnel: {label:"Prévisionnel",    icon:"◇"},
+  clients:      {label:"Clients",         icon:"○"},
+  charges:      {label:"Charges",         icon:"△"},
+  rentabilite:  {label:"Rentabilité",      icon:"◉"},
+  admin:        {label:"Administration",  icon:"⚙"},
+};
+
+/* ═══════════════════════════════════════════════════════════
+   APP ROOT
+═══════════════════════════════════════════════════════════ */
+export default function App() {
+  const [role,     setRole]     = useState(null);
+  const [tab,      setTab]      = useState(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [contrats, _setContrats] = useState([]);
+  const [clients,  _setClients]  = useState([]);
+  const [charges,  _setCharges]  = useState([]);
+  const [roles,    _setRoles]    = useState(ROLES);
+  const [loading,  setLoading]   = useState(true);
+  const [dbError,  setDbError]   = useState(null);
+
+  /* ══════════════════════════════════════════════════════════
+     WRAPPERS ÉCRITURE : setState + upsert Supabase simultanés
+     Chaque composant enfant reçoit ces fonctions à la place
+     des setters bruts. L'écriture en DB est directe et
+     immédiate — pas de useEffect intermédiaire.
+  ══════════════════════════════════════════════════════════ */
+
+  // Upsert un seul objet dans une table Supabase
+  const sbUpsert = (table, obj) => {
+    sb.from(table)
+      .upsert({ id: String(obj.id), data: obj }, { onConflict: "id" })
+      .then(({ error }) => { if (error) console.error(`${table} save:`, error, obj); });
+  };
+
+  // Supprime un enregistrement dans Supabase
+  const sbDelete = (table, id) => {
+    sb.from(table)
+      .delete()
+      .eq("id", String(id))
+      .then(({ error }) => { if (error) console.error(`${table} delete:`, error); });
+  };
+
+  // setContrats : accepte une valeur ou une fonction updater (comme useState)
+  // Après chaque mise à jour, upsert les contrats créés/modifiés et supprime ceux effacés
+  const setContrats = (updaterOrValue) => {
+    _setContrats(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+
+      // Détecter les contrats supprimés → delete dans Supabase
+      const prevIds = new Set(prev.map(c => String(c.id)));
+      const nextIds = new Set(next.map(c => String(c.id)));
+      prevIds.forEach(id => {
+        if (!nextIds.has(id)) sbDelete("contrats", id);
+      });
+
+      // Upsert les contrats nouveaux ou modifiés
+      next.forEach(c => {
+        const prevC = prev.find(p => String(p.id) === String(c.id));
+        // Nouveau contrat ou contrat modifié (comparaison rapide par JSON)
+        if (!prevC || JSON.stringify(prevC) !== JSON.stringify(c)) {
+          sbUpsert("contrats", c);
+        }
+      });
+
+      return next;
+    });
+  };
+
+  const setClients = (updaterOrValue) => {
+    _setClients(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+      const prevIds = new Set(prev.map(c => String(c.id)));
+      const nextIds = new Set(next.map(c => String(c.id)));
+      prevIds.forEach(id => { if (!nextIds.has(id)) sbDelete("clients", id); });
+      next.forEach(c => {
+        const prevC = prev.find(p => String(p.id) === String(c.id));
+        if (!prevC || JSON.stringify(prevC) !== JSON.stringify(c)) sbUpsert("clients", c);
+      });
+      return next;
+    });
+  };
+
+  const setCharges = (updaterOrValue) => {
+    _setCharges(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+      const prevIds = new Set(prev.map(c => String(c.id)));
+      const nextIds = new Set(next.map(c => String(c.id)));
+      prevIds.forEach(id => { if (!nextIds.has(id)) sbDelete("charges", id); });
+      next.forEach(c => {
+        const prevC = prev.find(p => String(p.id) === String(c.id));
+        if (!prevC || JSON.stringify(prevC) !== JSON.stringify(c)) sbUpsert("charges", c);
+      });
+      return next;
+    });
+  };
+
+  const setRoles = (updaterOrValue) => {
+    _setRoles(prev => {
+      const next = typeof updaterOrValue === "function"
+        ? updaterOrValue(prev)
+        : updaterOrValue;
+      Object.values(next).forEach(r => {
+        const prevR = prev[r.id];
+        if (!prevR || JSON.stringify(prevR) !== JSON.stringify(r)) {
+          sb.from("roles")
+            .upsert({ id: r.id, data: r }, { onConflict: "id" })
+            .then(({ error }) => { if (error) console.error("Role save:", error); });
+        }
+      });
+      return next;
+    });
+  };
+
+  /* ── CHARGEMENT INITIAL DEPUIS SUPABASE ────────────────── */
+  useEffect(() => {
+    async function load() {
+      try {
+        const [{ data: ct, error: eCt }, { data: cl, error: eCl },
+               { data: ch, error: eCh }, { data: ro, error: eRo }] = await Promise.all([
+          sb.from("contrats").select("*").order("created_at", { ascending: true }),
+          sb.from("clients").select("*").order("created_at",  { ascending: true }),
+          sb.from("charges").select("*").order("created_at",  { ascending: true }),
+          sb.from("roles").select("*"),
+        ]);
+
+        if (eCt) { console.warn("Contrats load error:", eCt); }
+        if (eCl) { console.warn("Clients load error:",  eCl); }
+        if (eCh) { console.warn("Charges load error:",  eCh); }
+
+        // Chargement direct avec _set* pour ne PAS déclencher d'upsert
+        // (les données viennent déjà de la DB, inutile de les réécrire)
+        _setContrats(!eCt && ct?.length ? ct.map(r => r.data ?? r) : []);
+        _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : []);
+        _setCharges( !eCh && ch?.length ? ch.map(r => r.data ?? r) : []);
+
+        if (!eRo && ro?.length) {
+          const rolesObj = { ...ROLES };
+          ro.forEach(r => {
+            const d = r.data ?? r;
+            if (rolesObj[d.id]) rolesObj[d.id] = { ...rolesObj[d.id], ...d };
+          });
+          _setRoles(rolesObj);
+        }
+      } catch (err) {
+        console.error("Supabase connection error:", err);
+        setDbError("Mode hors-ligne — impossible de joindre la base de données.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  const handleLogin = (roleId) => {
+    // Auth Supabase en arrière-plan — fire and forget
+    const emailMap = {
+      ADMIN:"admin@cabinet.ma", RAF:"raf@cabinet.ma",
+      CDP1:"cdp1@cabinet.ma", CDP2:"cdp2@cabinet.ma",
+      CDP3:"cdp3@cabinet.ma", CDP4:"cdp4@cabinet.ma",
+    };
+    const pinMap = { ADMIN:"0000", RAF:"1234", CDP1:"1111", CDP2:"2222", CDP3:"3333", CDP4:"4444" };
+    if (emailMap[roleId]) {
+      sb.auth.signInWithPassword({
+        email: emailMap[roleId],
+        password: `ARPERP_PIN_${pinMap[roleId]}`,
+      }).then(({ data, error }) => {
+        if (!error) {
+          // Snapshot de session dans audit_log
+          sb.from("audit_log").insert({
+            user_id:    data?.user?.id ?? null,
+            user_name:  roleId,
+            action:     "SESSION",
+            table_name: "session",
+            record_id:  Date.now().toString(),
+            context:    `Connexion — ${roleId} — ${new Date().toLocaleString("fr-MA")}`,
+            new_value:  { role: roleId, ts: new Date().toISOString() },
+          }).catch(() => {});
+        }
+      }).catch(e => console.warn("Supabase Auth:", e.message));
+    }
+    setRole(roleId);
+    setTab(roles[roleId].tabs[0]);
+  };
+
+  const handleLogout = () => {
+    sb.auth.signOut().catch(() => {});
+    setRole(null);
+    setTab(null);
+  };
+
+  /* ── ÉCRAN DE CHARGEMENT ───────────────────────────────── */
+  if (loading) return (
+    <>
+      <style>{GFONT}</style><style>{CSS}</style>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",
+        height:"100vh",background:T.bg,flexDirection:"column",gap:20}}>
+        <div style={{fontSize:24,fontFamily:"'Inter',sans-serif",fontWeight:700,letterSpacing:"-.02em"}}>
+          Arc<span style={{color:T.gold}}>ERP</span>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{width:7,height:7,borderRadius:"50%",background:T.gold,
+              animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:T.dim,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".12em"}}>
+          CONNEXION BASE DE DONNÉES...
+        </div>
+      </div>
+    </>
+  );
+
+  if(!role) return (
+    <>
+      <style>{GFONT}</style><style>{CSS}</style>
+      {dbError&&(
+        <div style={{position:"fixed",bottom:16,left:"50%",transform:"translateX(-50%)",
+          background:`${T.orange}18`,border:`1px solid ${T.orange}50`,borderRadius:6,
+          padding:"7px 16px",fontSize:11,color:T.orange,fontFamily:"'JetBrains Mono',monospace",
+          zIndex:9999,whiteSpace:"nowrap"}}>
+          ⚠ {dbError}
+        </div>
+      )}
+      <LoginScreen onLogin={handleLogin}/>
+    </>
+  );
+
+  const currentRole = roles[role];
+  const allowedTabs = currentRole.tabs;
+
+  return (
+    <>
+      <style>{GFONT}</style><style>{CSS}</style>
+      <div style={{display:"flex",minHeight:"100vh",background:T.bg}}>
+
+        {/* SIDEBAR */}
+        <div style={{width:215,background:T.surface,borderRight:`1px solid ${T.border}`,
+          display:"flex",flexDirection:"column",flexShrink:0,
+          position:"sticky",top:0,height:"100vh"}}>
+
+          {/* Logo */}
+          <div style={{padding:"20px 18px 14px"}}>
+            <div style={{fontSize:8,color:T.goldDk,fontFamily:"'JetBrains Mono',monospace",
+              letterSpacing:".2em",textTransform:"uppercase",marginBottom:5}}>
+              CABINET D'ARCHITECTURE
+            </div>
+            <div style={{fontSize:20,fontFamily:"'Inter',sans-serif",fontWeight:700,
+              color:T.text,lineHeight:1.2}}>
+              Arc<span style={{color:T.gold}}>ERP</span>
+            </div>
+          </div>
+
+          {/* Badge rôle */}
+          <div style={{margin:"0 12px 12px",padding:"9px 12px",
+            background:`${currentRole.couleur}12`,
+            border:`1px solid ${currentRole.couleur}35`,borderRadius:7,
+            display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16,color:currentRole.couleur}}>{currentRole.icon}</span>
+            <div>
+              <div style={{fontSize:12,fontFamily:"'Inter',sans-serif",fontWeight:600,
+                color:currentRole.couleur}}>{currentRole.label}</div>
+              <div style={{fontSize:9,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
+                letterSpacing:".06em"}}>SESSION ACTIVE</div>
+            </div>
+          </div>
+
+          <div style={{height:1,background:T.border,margin:"0 12px 10px"}}/>
+
+          {/* Navigation */}
+          <nav style={{flex:1,padding:"0 8px",overflowY:"auto"}}>
+            {allowedTabs.map(t=>{
+              const cfg = TABS_CONFIG[t];
+              if(!cfg) return null;
+              const active = tab===t;
+              return (
+                <button key={t} onClick={()=>setTab(t)} style={{
+                  width:"100%",padding:"10px 12px",borderRadius:6,border:"none",
+                  background:active?`${currentRole.couleur}14`:"transparent",
+                  color:active?currentRole.couleur:T.sub,
+                  display:"flex",alignItems:"center",gap:9,cursor:"pointer",
+                  fontSize:13,fontFamily:"'Inter',sans-serif",fontWeight:active?500:400,
+                  transition:"all .15s",marginBottom:2,textAlign:"left",
+                  borderLeft:active?`2px solid ${currentRole.couleur}`:"2px solid transparent"
+                }}>
+                  <span style={{fontSize:12}}>{cfg.icon}</span>{cfg.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Barème */}
+          <div style={{padding:"10px 14px",borderTop:`1px solid ${T.border}`}}>
+            <div style={{fontSize:8,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
+              letterSpacing:".1em",marginBottom:7,textTransform:"uppercase"}}>Jalons</div>
+            {PHASES_DEF.map(ph=>(
+              <div key={ph.key} style={{display:"flex",justifyContent:"space-between",
+                marginBottom:2,alignItems:"center"}}>
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:ph.couleur,flexShrink:0}}/>
+                  <span style={{fontSize:9,color:T.dim}}>{ph.label.split(" ").slice(0,2).join(" ")}</span>
+                </div>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:ph.couleur}}>{ph.pct}%</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Déconnexion */}
+          <button onClick={() => setShowLogoutConfirm(true)} style={{margin:"10px 12px",padding:"9px",
+            background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,
+            color:T.dim,cursor:"pointer",fontSize:11,fontFamily:"'JetBrains Mono',monospace",
+            letterSpacing:".06em",transition:"all .15s"}}
+            onMouseOver={e=>{e.currentTarget.style.borderColor=T.red;e.currentTarget.style.color=T.red;}}
+            onMouseOut={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.color=T.dim;}}>
+            ← DÉCONNEXION
+          </button>
+        </div>
+
+        {/* CONTENU */}
+        <div style={{flex:1,overflow:"auto",padding:28}}>
+          {(tab==="dashboard"||tab==="dashboard_raf")&&
+            <PageDashboard contrats={contrats} clients={clients} charges={charges} role={role}/>}
+          {tab==="contrats"&&
+            <PageContrats contrats={contrats} setContrats={setContrats} clients={clients} charges={charges}/>}
+          {tab==="facturation"&&
+            <PageFacturation contrats={contrats} setContrats={setContrats} clients={clients}/>}
+          {tab==="technique"&&
+            <PageTechnique contrats={contrats} setContrats={setContrats} roleId={role} roles={roles}/>}
+          {tab==="previsionnel"&&
+            <PagePrevisionnel contrats={contrats} charges={charges}/>}
+          {tab==="clients"&&
+            <PageClients clients={clients} setClients={setClients} contrats={contrats}/>}
+          {tab==="charges"&&
+            <PageCharges charges={charges} setCharges={setCharges}/>}
+          {tab==="rentabilite"&&
+            <PageRentabilite contrats={contrats} charges={charges} roles={roles}/>}
+          {tab==="admin"&&
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}/>}
+        </div>
+      </div>
+    </>
+    {/* ── Modal confirmation déconnexion ── */}
+    {showLogoutConfirm && (
       <div style={{
-        position:"fixed", inset:0, zIndex:9999,
+        position:"fixed",inset:0,zIndex:9999,
         background:"rgba(0,0,0,0.7)",
-        display:"flex", alignItems:"center", justifyContent:"center",
+        display:"flex",alignItems:"center",justifyContent:"center",
         padding:"1rem",
       }}>
         <div style={{
-          background:"#17171B", border:"1px solid #3A3A46",
-          borderRadius:"12px", padding:"2rem",
-          width:"100%", maxWidth:"420px",
+          background:"#17171B",border:"1px solid #3A3A46",
+          borderRadius:"12px",padding:"2rem",
+          width:"100%",maxWidth:"400px",
         }}>
           <div style={{
-            display:"inline-flex", alignItems:"center", gap:"6px",
-            background:"rgba(241,107,107,0.15)", color:"#F16B6B",
-            borderRadius:"6px", padding:"4px 10px",
-            fontSize:"12px", fontWeight:500, marginBottom:"1rem",
+            fontSize:"12px",fontWeight:500,
+            color:"#D4A84B",marginBottom:"1rem",
+            letterSpacing:"0.05em",textTransform:"uppercase",
           }}>
-            ⚠ Modifications non enregistrées
+            Confirmation
           </div>
-          <h2 style={{fontSize:"16px", fontWeight:500, color:"#F5F4F9", margin:"0 0 0.5rem"}}>
-            Quitter sans enregistrer ?
+          <h2 style={{fontSize:"16px",fontWeight:500,color:"#F5F4F9",margin:"0 0 0.5rem"}}>
+            Se déconnecter ?
           </h2>
-          <p style={{fontSize:"14px", color:"#9090A8", margin:"0 0 1.5rem", lineHeight:1.6}}>
-            Vous avez des modifications en cours. Si vous quittez maintenant, ces changements seront perdus.
+          <p style={{fontSize:"14px",color:"#9090A8",margin:"0 0 1.5rem",lineHeight:1.6}}>
+            Voulez-vous quitter la session en cours ? Toutes vos données sont enregistrées automatiquement.
           </p>
-          <div style={{display:"flex", gap:"10px", justifyContent:"flex-end"}}>
+          <div style={{display:"flex",gap:"10px",justifyContent:"flex-end"}}>
             <button
-              onClick={() => setShowUnsavedAlert(false)}
+              onClick={() => setShowLogoutConfirm(false)}
               style={{
-                padding:"9px 18px", borderRadius:"8px",
-                border:"1px solid #26262E", background:"transparent",
-                color:"#9090A8", fontSize:"14px", cursor:"pointer",
+                padding:"9px 18px",borderRadius:"8px",
+                border:"1px solid #26262E",background:"transparent",
+                color:"#9090A8",fontSize:"14px",cursor:"pointer",
+                fontFamily:"inherit",
               }}
             >
               Annuler
             </button>
             <button
-              onClick={() => { setShowUnsavedAlert(false); setHasUnsaved(false); handleLogout(); }}
+              onClick={() => { setShowLogoutConfirm(false); handleLogout(); }}
               style={{
-                padding:"9px 18px", borderRadius:"8px",
-                border:"none", background:"rgba(241,107,107,0.15)",
-                color:"#F16B6B", fontSize:"14px", fontWeight:500,
-                cursor:"pointer",
+                padding:"9px 18px",borderRadius:"8px",
+                border:"none",background:"#D4A84B",
+                color:"#0C0C0E",fontSize:"14px",fontWeight:600,
+                cursor:"pointer",fontFamily:"inherit",
               }}
             >
-              Quitter sans enregistrer
+              Confirmer la déconnexion
             </button>
           </div>
         </div>
