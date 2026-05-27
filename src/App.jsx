@@ -3279,41 +3279,47 @@ export default function App() {
      immédiate — pas de useEffect intermédiaire.
   ══════════════════════════════════════════════════════════ */
 
-  // Upsert un seul objet dans une table Supabase + journal audit
-  const sbUpsert = async (table, obj, isNew = false) => {
-    const { error } = await sb.from(table)
-      .upsert({ id: String(obj.id), data: obj }, { onConflict: "id" });
-    if (error) { console.error(`${table} save:`, error, obj); return; }
-    // Journal
-    const { data: { user } } = await sb.auth.getUser();
-    if (user) {
-      sb.from("audit_log").insert({
-        user_id:    user.id,
-        user_name:  role ? (roles[role]?.label ?? role) : "Système",
-        action:     isNew ? "CREATE" : "UPDATE",
-        table_name: table,
-        record_id:  String(obj.id),
-        context:    `${isNew?"Création":"Modification"} ${table} — id:${obj.id}`,
-      }).then(({error:e})=>{ if(e) console.warn("audit:",e.message); });
-    }
+  // Upsert un seul objet dans une table Supabase
+  const sbUpsert = (table, obj) => {
+    sb.from(table)
+      .upsert({ id: String(obj.id), data: obj }, { onConflict: "id" })
+      .then(({ error }) => {
+        if (error) { console.error(`${table} save:`, error, obj); return; }
+        // Journal audit — fire and forget, ne bloque rien
+        sb.auth.getUser().then(({ data: { user } }) => {
+          if (!user) return;
+          sb.from("audit_log").insert({
+            user_id:    user.id,
+            user_name:  "Utilisateur",
+            action:     "UPDATE",
+            table_name: table,
+            record_id:  String(obj.id),
+            context:    `Modification ${table} — id:${obj.id}`,
+          }).then(({ error: e }) => { if (e) console.warn("audit:", e.message); });
+        });
+      });
   };
 
-  // Supprime un enregistrement dans Supabase + journal audit
-  const sbDelete = async (table, id) => {
-    const { error } = await sb.from(table).delete().eq("id", String(id));
-    if (error) { console.error(`${table} delete:`, error); return; }
-    // Journal
-    const { data: { user } } = await sb.auth.getUser();
-    if (user) {
-      sb.from("audit_log").insert({
-        user_id:    user.id,
-        user_name:  role ? (roles[role]?.label ?? role) : "Système",
-        action:     "DELETE",
-        table_name: table,
-        record_id:  String(id),
-        context:    `Suppression ${table} — id:${id}`,
-      }).then(({error:e})=>{ if(e) console.warn("audit:",e.message); });
-    }
+  // Supprime un enregistrement dans Supabase
+  const sbDelete = (table, id) => {
+    sb.from(table)
+      .delete()
+      .eq("id", String(id))
+      .then(({ error }) => {
+        if (error) { console.error(`${table} delete:`, error); return; }
+        // Journal audit — fire and forget, ne bloque rien
+        sb.auth.getUser().then(({ data: { user } }) => {
+          if (!user) return;
+          sb.from("audit_log").insert({
+            user_id:    user.id,
+            user_name:  "Utilisateur",
+            action:     "DELETE",
+            table_name: table,
+            record_id:  String(id),
+            context:    `Suppression ${table} — id:${id}`,
+          }).then(({ error: e }) => { if (e) console.warn("audit:", e.message); });
+        });
+      });
   };
 
   // setContrats : accepte une valeur ou une fonction updater (comme useState)
@@ -3436,8 +3442,8 @@ export default function App() {
     load();
   }, []);
 
-  const handleLogin = async (roleId) => {
-    // Connexion Supabase Auth en arrière-plan (session persistante)
+  const handleLogin = (roleId) => {
+    // Connexion Supabase Auth en arrière-plan — fire and forget
     const emailMap = {
       ADMIN:"admin@cabinet.ma", RAF:"raf@cabinet.ma",
       CDP1:"cdp1@cabinet.ma",   CDP2:"cdp2@cabinet.ma",
@@ -3447,21 +3453,17 @@ export default function App() {
       ADMIN:"0000", RAF:"1234",
       CDP1:"1111",  CDP2:"2222", CDP3:"3333", CDP4:"4444",
     };
-    try {
-      await sb.auth.signInWithPassword({
-        email:    emailMap[roleId],
-        password: `ARPERP_PIN_${pinMap[roleId]}`,
-      });
-    } catch(e) {
-      console.warn("Supabase Auth signin:", e.message);
-      // On laisse passer — l'accès local fonctionne quand même
-    }
+    sb.auth.signInWithPassword({
+      email:    emailMap[roleId],
+      password: `ARPERP_PIN_${pinMap[roleId]}`,
+    }).catch(e => console.warn("Supabase Auth signin:", e.message));
+    // Navigation immédiate — pas d'await
     setRole(roleId);
     setTab(roles[roleId].tabs[0]);
   };
 
-  const handleLogout = async () => {
-    try { await sb.auth.signOut(); } catch(e) { /* silencieux */ }
+  const handleLogout = () => {
+    sb.auth.signOut().catch(() => {});
     setRole(null);
     setTab(null);
   };
