@@ -1961,9 +1961,6 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
           {saving ? "Enregistrement..." : hasDraft ? "✓ Enregistrer" : "✓ Enregistré"}
         </button>
       </div>
-        <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:T.sub}}>{contrat.ref}</span>
-        <Tag c={T.sub} sm>{contrat.type}</Tag>
-      </div>
 
       {/* Titre */}
       <div style={{marginBottom:20}}>
