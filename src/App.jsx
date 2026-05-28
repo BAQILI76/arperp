@@ -1860,18 +1860,19 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
   // Enregistrer tout le brouillon en DB
   const saveAll = async () => {
     setSaving(true);
-    for (const [phaseKey, updates] of Object.entries(draft)) {
-      await onUpdate(contrat.id, phaseKey, updates);
-    }
-    // Journal : enregistrer la sauvegarde CDP
-    sb.from("audit_log").insert({
-      user_name:  "CDP",
-      action:     "SAVE",
-      table_name: "contrats",
-      record_id:  String(contrat.id),
-      context:    `Avancement sauvegardé — ${contrat.ref} · ${Object.keys(draft).join(", ")}`,
-      new_value:  draft,
-    }).catch(()=>{});
+    try {
+      for (const [phaseKey, updates] of Object.entries(draft)) {
+        onUpdate(contrat.id, phaseKey, updates); // pas d'await — non-bloquant
+      }
+      sb.from("audit_log").insert({
+        user_name:  "CDP",
+        action:     "SAVE",
+        table_name: "contrats",
+        record_id:  String(contrat.id),
+        context:    `Avancement sauvegardé — ${contrat.ref} · ${Object.keys(draft).join(", ")}`,
+        new_value:  draft,
+      }).catch(()=>{});
+    } catch(e) { console.warn("saveAll:", e); }
     setDraft({});
     setHasDraft(false);
     setSaving(false);
@@ -2112,7 +2113,7 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
               {!livree && (
                 <div style={{padding:"0 16px 10px"}}>
                   <div style={{height:4,background:T.border,borderRadius:2,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:`${ph.avancement||0}%`,
+                    <div style={{height:"100%",width:`${phaseVal(ph,"avancement")||0}%`,
                       background:ph.couleur,borderRadius:2,transition:"width .4s"}}/>
                   </div>
                   <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
