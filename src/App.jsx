@@ -2249,7 +2249,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
   const totalSem = echs.filter(ph=>form[ph.key+"_actif"])
     .reduce((s,ph)=>(s + (+form[ph.key+"_delai"]||0) + (+form[ph.key+"_retard"]||0)), 0);
 
-  const handleSoumettre = async () => {
+  const handleSoumettre = () => {
     setSaving(true);
     // Construire les nouvelles modalites avec le planning CDP
     const newModalites = {...contrat.modalites};
@@ -2262,8 +2262,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
         planning_statut:  "soumis",
       };
     });
-    newModalites["_date_debut_cdp"] = form.dateDebut;
-    await onSave(contrat.id, {
+    onSave(contrat.id, {
       date_debut_cdp: form.dateDebut,
       modalites: newModalites,
       planning_global_statut: "soumis",
@@ -2375,7 +2374,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
                       <div style={{fontSize:12,color:T.text,fontFamily:"'Inter',sans-serif",
                         fontWeight:500}}>{ph.label}</div>
                       <div style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>
-                        {ph.pct}% des honoraires · {fmt(Math.round((contrat.honoraires*ph.pct)/100))}
+                        Jalon {ph.pct}%
                       </div>
                     </div>
                   </div>
@@ -2480,12 +2479,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
                         <div style={{fontSize:11,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>
                           {ph.date_paiement}</div>
                       </div>
-                      <div>
-                        <div style={{fontSize:8,color:T.dim,letterSpacing:".05em",textTransform:"uppercase",
-                          fontFamily:"'JetBrains Mono',monospace",marginBottom:1}}>Montant</div>
-                        <div style={{fontSize:11,color:T.text,fontFamily:"'JetBrains Mono',monospace"}}>
-                          {fmt(ph.montant)}</div>
-                      </div>
+
                     </div>
                   </div>
                 ))
@@ -2494,9 +2488,10 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
                 <div style={{padding:"10px 16px",background:T.surface,
                   borderTop:`1px solid ${T.border}`,
                   display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:10,color:T.sub}}>Total honoraires</span>
-                  <span style={{fontSize:13,color:T.gold,fontFamily:"'JetBrains Mono',monospace",
-                    fontWeight:700}}>{fmt(dates.reduce((s,e)=>s+e.montant,0))}</span>
+                  <span style={{fontSize:10,color:T.sub}}>{dates.length} jalon(s) planifié(s)</span>
+                  <span style={{fontSize:11,color:T.sub,fontFamily:"'JetBrains Mono',monospace"}}>
+                    {semToLabel(dates.reduce((s,e)=>s+(e.delai_cdp||0)+(e.retard_cdp||0),0))} total
+                  </span>
                 </div>
               )}
             </div>
