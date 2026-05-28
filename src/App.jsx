@@ -2373,9 +2373,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
                     <div>
                       <div style={{fontSize:12,color:T.text,fontFamily:"'Inter',sans-serif",
                         fontWeight:500}}>{ph.label}</div>
-                      <div style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>
-                        Jalon {ph.pct}%
-                      </div>
+
                     </div>
                   </div>
                   {/* Délai */}
@@ -2464,7 +2462,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
                         <span style={{fontSize:11,color:T.text,fontFamily:"'Inter',sans-serif",
                           fontWeight:500}}>{ph.label}</span>
                       </div>
-                      <Tag c={ph.couleur} sm>{ph.pct}%</Tag>
+
                     </div>
                     <div style={{display:"flex",gap:16,paddingLeft:12}}>
                       <div>
@@ -2473,12 +2471,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
                         <div style={{fontSize:11,color:ph.couleur,fontFamily:"'JetBrains Mono',monospace",
                           fontWeight:600}}>{ph.date_echeance}</div>
                       </div>
-                      <div>
-                        <div style={{fontSize:8,color:T.dim,letterSpacing:".05em",textTransform:"uppercase",
-                          fontFamily:"'JetBrains Mono',monospace",marginBottom:1}}>Encaissement</div>
-                        <div style={{fontSize:11,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>
-                          {ph.date_paiement}</div>
-                      </div>
+
 
                     </div>
                   </div>
