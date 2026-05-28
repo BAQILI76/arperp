@@ -1841,26 +1841,126 @@ function JalonSelector({value, onChange, couleur, disabled}) {
    DETAIL PROJET
 ═══════════════════════════════════════════════════════════ */
 function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
-  const [noteEdit, setNoteEdit] = useState({});
+  const [noteEdit,    setNoteEdit]    = useState({});
+  // Mode brouillon : on stocke les modifs localement avant d'enregistrer
+  const [draft,       setDraft]       = useState({});   // {phaseKey: {avancement,retard,...}}
+  const [hasDraft,    setHasDraft]    = useState(false);
+  const [saving,      setSaving]      = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false); // alerte avant quitter sans enregistrer
+
   const phases = (contrat.echeances||[]).filter(p=>PHASES_SUIVI.includes(p.key));
   const av = getAvancement(contrat);
 
-  const updatePhase = (phaseKey, updates) => onUpdate(contrat.id, phaseKey, updates);
+  // Modif locale uniquement — pas encore en DB
+  const draftPhase = (phaseKey, updates) => {
+    setDraft(prev => ({...prev, [phaseKey]: {...(prev[phaseKey]||{}), ...updates}}));
+    setHasDraft(true);
+  };
+
+  // Enregistrer tout le brouillon en DB
+  const saveAll = async () => {
+    setSaving(true);
+    for (const [phaseKey, updates] of Object.entries(draft)) {
+      await onUpdate(contrat.id, phaseKey, updates);
+    }
+    // Journal : enregistrer la sauvegarde CDP
+    sb.from("audit_log").insert({
+      user_name:  "CDP",
+      action:     "SAVE",
+      table_name: "contrats",
+      record_id:  String(contrat.id),
+      context:    `Avancement sauvegardé — ${contrat.ref} · ${Object.keys(draft).join(", ")}`,
+      new_value:  draft,
+    }).catch(()=>{});
+    setDraft({});
+    setHasDraft(false);
+    setSaving(false);
+  };
+
+  // Quitter : si brouillon non enregistré → demander confirmation
+  const handleClose = () => {
+    if(hasDraft) { setShowConfirm(true); } else { onClose(); }
+  };
+
+  // Lire la valeur effective d'une phase (brouillon prioritaire)
+  const phaseVal = (ph, key) => {
+    if(draft[ph.key] && draft[ph.key][key] !== undefined) return draft[ph.key][key];
+    return ph[key];
+  };
 
   return (
     <div style={{animation:"fadeIn .25s ease"}}>
-      {/* Retour */}
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-        <button onClick={onClose} style={{
-          background:T.card2,border:`1px solid ${T.border}`,borderRadius:7,
-          padding:"7px 14px",color:T.sub,cursor:"pointer",fontSize:12,
-          fontFamily:"'JetBrains Mono',monospace",letterSpacing:".05em",
-          display:"flex",alignItems:"center",gap:6,transition:"all .15s"
-        }}
-        onMouseOver={e=>{e.currentTarget.style.borderColor=cdpCouleur||T.teal;e.currentTarget.style.color=cdpCouleur||T.teal;}}
-        onMouseOut={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.color=T.sub;}}>
-          ← Liste des projets
+
+      {/* ── Alerte quitter sans enregistrer ── */}
+      {showConfirm && (
+        <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,0.82)",
+          display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+          <div style={{background:T.card,border:`1px solid ${T.borderHi}`,borderRadius:12,
+            padding:"28px",width:"100%",maxWidth:380,boxShadow:"0 24px 60px rgba(0,0,0,.6)"}}>
+            <div style={{fontSize:9,color:T.orange,fontFamily:"'JetBrains Mono',monospace",
+              letterSpacing:".15em",textTransform:"uppercase",marginBottom:10}}>
+              Modifications non enregistrées
+            </div>
+            <div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:8}}>
+              Quitter sans enregistrer ?
+            </div>
+            <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:7,
+              padding:"10px 13px",marginBottom:20,fontSize:12,color:T.sub,lineHeight:1.7}}>
+              Vous avez {Object.keys(draft).length} phase(s) modifiée(s) non sauvegardée(s).<br/>
+              <span style={{color:T.orange}}>Ces modifications seront perdues.</span>
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowConfirm(false)} style={{
+                padding:"9px 18px",borderRadius:7,border:`1px solid ${T.border}`,
+                background:"transparent",color:T.sub,fontSize:13,cursor:"pointer",
+                fontFamily:"'Inter',sans-serif"}}>← Continuer</button>
+              <button onClick={async ()=>{ await saveAll(); setShowConfirm(false); onClose(); }} style={{
+                padding:"9px 18px",borderRadius:7,border:"none",background:cdpCouleur||T.teal,
+                color:"#08080A",fontSize:13,fontWeight:600,cursor:"pointer",
+                fontFamily:"'Inter',sans-serif"}}>Enregistrer et quitter</button>
+              <button onClick={()=>{ setDraft({}); setHasDraft(false); setShowConfirm(false); onClose(); }} style={{
+                padding:"9px 18px",borderRadius:7,border:`1px solid ${T.red}40`,
+                background:"transparent",color:T.red,fontSize:13,cursor:"pointer",
+                fontFamily:"'Inter',sans-serif"}}>Quitter sans sauvegarder</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Retour + barre d'actions */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={handleClose} style={{
+            background:T.card2,border:`1px solid ${T.border}`,borderRadius:7,
+            padding:"7px 14px",color:T.sub,cursor:"pointer",fontSize:12,
+            fontFamily:"'JetBrains Mono',monospace",letterSpacing:".05em",
+            display:"flex",alignItems:"center",gap:6,transition:"all .15s"
+          }}
+          onMouseOver={e=>{e.currentTarget.style.borderColor=cdpCouleur||T.teal;e.currentTarget.style.color=cdpCouleur||T.teal;}}
+          onMouseOut={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.color=T.sub;}}>
+            ← Liste des projets
+          </button>
+          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:T.sub}}>{contrat.ref}</span>
+          {hasDraft && (
+            <span style={{fontSize:10,color:T.orange,fontFamily:"'JetBrains Mono',monospace",
+              background:`${T.orange}15`,padding:"2px 8px",borderRadius:4,animation:"pulse 2s infinite"}}>
+              ● Modifications non sauvegardées
+            </span>
+          )}
+        </div>
+        {/* Bouton Enregistrer */}
+        <button onClick={saveAll} disabled={!hasDraft||saving} style={{
+          padding:"9px 22px",borderRadius:7,border:"none",
+          background:hasDraft?(cdpCouleur||T.teal):`${T.border}`,
+          color:hasDraft?"#08080A":T.dim,
+          fontSize:13,fontWeight:600,cursor:hasDraft?"pointer":"not-allowed",
+          fontFamily:"'Inter',sans-serif",transition:"all .2s",
+          opacity:saving?0.6:1,display:"flex",alignItems:"center",gap:8,
+        }}>
+          {saving ? "Enregistrement..." : hasDraft ? "✓ Enregistrer" : "✓ Enregistré"}
         </button>
+      </div>
         <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:T.sub}}>{contrat.ref}</span>
         <Tag c={T.sub} sm>{contrat.type}</Tag>
       </div>
@@ -1956,8 +2056,8 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
                         Avancement
                       </div>
                       <JalonSelector
-                        value={ph.avancement||0}
-                        onChange={v=>updatePhase(ph.key,{avancement:v})}
+                        value={phaseVal(ph,"avancement")||0}
+                        onChange={v=>draftPhase(ph.key,{avancement:v})}
                         couleur={ph.couleur}
                         disabled={false}
                       />
@@ -1969,12 +2069,12 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
                         letterSpacing:".08em",textTransform:"uppercase",marginBottom:5,textAlign:"center"}}>
                         Retard (sem)
                       </div>
-                      <input type="number" min="0" max="52" value={ph.retard||0}
-                        onChange={e=>updatePhase(ph.key,{retard:+e.target.value})}
-                        style={{width:48,background:ph.retard>0?`${T.red}18`:T.bg,
-                          border:`1px solid ${ph.retard>0?T.red:T.border}`,
+                      <input type="number" min="0" max="52" value={phaseVal(ph,"retard")||0}
+                        onChange={e=>draftPhase(ph.key,{retard:+e.target.value})}
+                        style={{width:48,background:phaseVal(ph,"retard")>0?`${T.red}18`:T.bg,
+                          border:`1px solid ${phaseVal(ph,"retard")>0?T.red:T.border}`,
                           borderRadius:5,padding:"5px 6px",
-                          color:ph.retard>0?T.red:T.text,
+                          color:phaseVal(ph,"retard")>0?T.red:T.text,
                           fontSize:13,fontFamily:"'JetBrains Mono',monospace",
                           textAlign:"center",display:"block"}}/>
                     </div>
@@ -2564,15 +2664,15 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                 ))}
               </div>
               {journal.map((entry,i)=>{
-                const snap = entry.snapshot ? (() => { try { return JSON.parse(entry.snapshot); } catch { return null; } })() : null;
-                const roleInfo = entry.role_id ? ROLES[entry.role_id] : null;
+                const snap = entry.new_value || null;
+                const roleInfo = entry.user_name ? ROLES[entry.user_name] : null;
                 const d = new Date(entry.created_at);
                 const dateStr = d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});
                 const timeStr = d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
-                const actionColor = entry.action==="LOGOUT"?T.orange:entry.action==="LOGIN"?T.green:T.blue;
+                const actionColor = entry.action==="LOGOUT"?T.orange:entry.action==="LOGIN"?T.green:entry.action==="SAVE"?T.teal:T.blue;
                 return (
                   <div key={entry.id||i} style={{
-                    display:"grid",gridTemplateColumns:"160px 90px 1fr 120px",gap:10,
+                    display:"grid",gridTemplateColumns:"160px 100px 1fr 120px",gap:10,
                     padding:"10px 16px",borderBottom:i<journal.length-1?`1px solid ${T.border}`:"none",
                     alignItems:"center",transition:"background .15s"
                   }}
@@ -2588,22 +2688,28 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                       {roleInfo ? (
                         <Tag c={roleInfo.couleur} sm>{roleInfo.label.split(" ")[0]}</Tag>
                       ) : (
-                        <span style={{fontSize:11,color:T.dim}}>{entry.role_id||"—"}</span>
+                        <span style={{fontSize:11,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>{entry.user_name||"—"}</span>
                       )}
                     </div>
-                    {/* Action */}
+                    {/* Action + contexte */}
                     <div>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2,flexWrap:"wrap"}}>
                         <Tag c={actionColor} sm>{entry.action}</Tag>
-                        <span style={{fontSize:12,color:T.sub}}>{entry.details}</span>
+                        {entry.table_name&&entry.table_name!=="session"&&(
+                          <span style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>
+                            {entry.table_name}{entry.field_name?` · ${entry.field_name}`:""}
+                          </span>
+                        )}
+                        <span style={{fontSize:11,color:T.sub}}>{entry.context}</span>
                       </div>
                     </div>
                     {/* Snapshot */}
                     <div>
-                      {snap && (
+                      {snap && typeof snap === "object" && (
                         <div style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.5}}>
                           {snap.contrats_count !== undefined && <div>{snap.contrats_count} contrat(s)</div>}
                           {snap.clients_count  !== undefined && <div>{snap.clients_count} client(s)</div>}
+                          {snap.role            !== undefined && <div style={{color:T.sub}}>{snap.role}</div>}
                         </div>
                       )}
                     </div>
@@ -3503,9 +3609,8 @@ export default function App() {
         if (!error) {
           // Snapshot de session dans audit_log
           sb.from("audit_log").insert({
-            user_id:    data?.user?.id ?? null,
             user_name:  roleId,
-            action:     "SESSION",
+            action:     "LOGIN",
             table_name: "session",
             record_id:  Date.now().toString(),
             context:    `Connexion — ${roleId} — ${new Date().toLocaleString("fr-MA")}`,
@@ -3528,11 +3633,12 @@ export default function App() {
         contrats_ids:   contrats.map(c=>c.id),
       };
       await sb.from("audit_log").insert({
-        role_id:    role,
+        user_name:  role,
         action:     "LOGOUT",
-        details:    `Déconnexion — ${contrats.length} contrats, ${clients.length} clients`,
-        snapshot:   JSON.stringify(snapshot),
-        created_at: new Date().toISOString(),
+        table_name: "session",
+        record_id:  Date.now().toString(),
+        context:    `Déconnexion — ${contrats.length} contrats, ${clients.length} clients`,
+        new_value:  snapshot,
       });
     } catch(e) { console.warn("audit_log:", e.message); }
     sb.auth.signOut().catch(() => {});
