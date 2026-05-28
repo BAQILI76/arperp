@@ -164,9 +164,33 @@ const mkEcheances = (contrat) => {
       facturable:    ov.facturable!==undefined ? ov.facturable : (ph.facturable!==false),
       groupe_fact:   ov.groupe_fact||null,
       libelle_fact:  ov.libelle_fact||"",
-      retard_manuel: ov.retard_manuel||false,
+      retard_manuel:   ov.retard_manuel||false,
+      // ── Workflow planning CDP ──
+      delai_cdp:       ov.delai_cdp||0,          // semaines saisies par CDP
+      date_debut_cdp:  ov.date_debut_cdp||null,   // date démarrage saisie par CDP
+      retard_cdp:      ov.retard_cdp||0,          // retard saisi par CDP
+      planning_statut: ov.planning_statut||null,  // null | "soumis" | "valide" | "revision"
+      retard_statut:   ov.retard_statut||null,    // null | "soumis" | "valide"
+      phase_active_cdp:ov.phase_active_cdp!==false, // jalon actif dans ce projet
     };
   }).filter(e=>e.actif);
+};
+
+/* ─── Calcul dates depuis planning CDP validé ─────── */
+const calcDatesCDP = (contrat) => {
+  const dateStart = contrat.date_debut_cdp || contrat.date_debut;
+  if(!dateStart) return contrat.echeances||[];
+  let cursor = dateStart;
+  return (contrat.echeances||[]).map(ph => {
+    if(!ph.phase_active_cdp) return ph;
+    const delai = ph.delai_cdp || ph.duree || 0;
+    const retard = (ph.retard_statut==="valide" ? ph.retard_cdp : 0) || ph.retard || 0;
+    const date_echeance = addW(cursor, delai + retard);
+    const date_paiement = addD(date_echeance, contrat.delai_paiement||14);
+    const result = {...ph, date_debut:cursor, date_echeance, date_paiement};
+    cursor = date_echeance;
+    return result;
+  });
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -2179,8 +2203,313 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
 /* ═══════════════════════════════════════════════════════════
    PAGE TECHNIQUE — LISTE + FILTRES + DÉTAIL
 ═══════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE PLANIFICATION CDP
+   CDP saisit : date démarrage + délais par jalon + jalons actifs
+   Soumet pour validation Admin
+═══════════════════════════════════════════════════════════ */
+function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
+  const echs = (contrat.echeances||[]).filter(e=>PHASES_SUIVI.includes(e.key));
+  
+  // Init état local depuis les données existantes
+  const initState = () => {
+    const s = { dateDebut: contrat.date_debut_cdp || contrat.date_debut || "" };
+    echs.forEach(ph => {
+      s[ph.key+"_actif"]  = ph.phase_active_cdp !== false;
+      s[ph.key+"_delai"]  = ph.delai_cdp || ph.duree || 0;
+      s[ph.key+"_retard"] = ph.retard_cdp || 0;
+    });
+    return s;
+  };
+
+  const [form,    setForm]    = useState(initState);
+  const [saving,  setSaving]  = useState(false);
+  const [preview, setPreview] = useState(true);
+
+  const set = (k,v) => setForm(prev=>({...prev,[k]:v}));
+
+  // Calcul preview dates
+  const calcDates = () => {
+    if(!form.dateDebut) return [];
+    let cursor = form.dateDebut;
+    return echs.filter(ph=>form[ph.key+"_actif"]).map(ph=>{
+      const delai  = +form[ph.key+"_delai"]  || 0;
+      const retard = +form[ph.key+"_retard"] || 0;
+      const date_echeance = addW(cursor, delai+retard);
+      const date_paiement = addD(date_echeance, contrat.delai_paiement||14);
+      const r = {...ph, date_debut:cursor, date_echeance, date_paiement,
+        montant: Math.round((contrat.honoraires*(ph.pct||0))/100)};
+      cursor = date_echeance;
+      return r;
+    });
+  };
+
+  const dates = calcDates();
+  const totalSem = echs.filter(ph=>form[ph.key+"_actif"])
+    .reduce((s,ph)=>(s + (+form[ph.key+"_delai"]||0) + (+form[ph.key+"_retard"]||0)), 0);
+
+  const handleSoumettre = async () => {
+    setSaving(true);
+    // Construire les nouvelles modalites avec le planning CDP
+    const newModalites = {...contrat.modalites};
+    echs.forEach(ph=>{
+      newModalites[ph.key] = {
+        ...(newModalites[ph.key]||{}),
+        phase_active_cdp: form[ph.key+"_actif"],
+        delai_cdp:        +form[ph.key+"_delai"]||0,
+        retard_cdp:       +form[ph.key+"_retard"]||0,
+        planning_statut:  "soumis",
+      };
+    });
+    newModalites["_date_debut_cdp"] = form.dateDebut;
+    await onSave(contrat.id, {
+      date_debut_cdp: form.dateDebut,
+      modalites: newModalites,
+      planning_global_statut: "soumis",
+    });
+    setSaving(false);
+    onClose();
+  };
+
+  const statutGlobal = contrat.planning_global_statut;
+  
+  return (
+    <div style={{animation:"fadeIn .25s ease"}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={onClose} style={{
+            background:T.card2,border:`1px solid ${T.border}`,borderRadius:7,
+            padding:"7px 14px",color:T.sub,cursor:"pointer",fontSize:12,
+            fontFamily:"'JetBrains Mono',monospace"}}>← Retour</button>
+          <div>
+            <div style={{fontSize:9,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
+              letterSpacing:".1em",textTransform:"uppercase"}}>{contrat.ref}</div>
+            <div style={{fontSize:16,fontWeight:600,color:T.text,fontFamily:"'Inter',sans-serif"}}>
+              {contrat.nom}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          {statutGlobal && (
+            <Tag c={statutGlobal==="valide"?T.green:statutGlobal==="soumis"?T.orange:T.red}>
+              {statutGlobal==="valide"?"✓ Validé":statutGlobal==="soumis"?"⏳ En attente validation":"↩ Révision demandée"}
+            </Tag>
+          )}
+          <button onClick={()=>setPreview(p=>!p)} style={{
+            background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,
+            color:T.sub,fontSize:11,padding:"6px 14px",cursor:"pointer",
+            fontFamily:"'JetBrains Mono',monospace"}}>
+            {preview?"Masquer aperçu":"Voir aperçu dates"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:preview?"1fr 380px":"1fr",gap:16}}>
+        {/* Colonne gauche — saisie */}
+        <div>
+          {/* Date démarrage */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,
+            padding:"16px 18px",marginBottom:14}}>
+            <div style={{fontSize:9,color:T.goldDk,fontFamily:"'JetBrains Mono',monospace",
+              letterSpacing:".12em",textTransform:"uppercase",marginBottom:10}}>
+              Date de démarrage du projet
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+              <input type="date" value={form.dateDebut}
+                onChange={e=>set("dateDebut",e.target.value)}
+                style={{background:T.bg,border:`1px solid ${cdpCouleur}60`,borderRadius:6,
+                  padding:"8px 12px",color:T.text,fontSize:13,
+                  fontFamily:"'JetBrains Mono',monospace",cursor:"pointer"}}/>
+              {totalSem>0&&(
+                <div style={{fontSize:12,color:T.sub}}>
+                  Durée totale : <span style={{color:cdpCouleur,fontWeight:600}}>
+                    {semToLabel(totalSem)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Jalons */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,overflow:"hidden"}}>
+            {/* Header tableau */}
+            <div style={{display:"grid",gridTemplateColumns:"32px 1fr 110px 110px 110px",
+              gap:8,padding:"9px 16px",background:T.card2,
+              borderBottom:`1px solid ${T.border}`}}>
+              {["","Jalon","Délai (sem)","Retard (sem)","Statut"].map(h=>(
+                <div key={h} style={{fontSize:9,color:T.dim,
+                  fontFamily:"'JetBrains Mono',monospace",
+                  letterSpacing:".06em",textTransform:"uppercase"}}>{h}</div>
+              ))}
+            </div>
+            {echs.map((ph,i)=>{
+              const actif  = form[ph.key+"_actif"];
+              const statut = ph.planning_statut;
+              return (
+                <div key={ph.key} style={{
+                  display:"grid",gridTemplateColumns:"32px 1fr 110px 110px 110px",
+                  gap:8,padding:"12px 16px",
+                  borderBottom:i<echs.length-1?`1px solid ${T.border}`:"none",
+                  background:actif?"transparent":`${T.border}20`,
+                  opacity:actif?1:0.5,transition:"all .15s",
+                  alignItems:"center"
+                }}>
+                  {/* Toggle actif */}
+                  <div style={{display:"flex",justifyContent:"center"}}>
+                    <button onClick={()=>set(ph.key+"_actif",!actif)} style={{
+                      width:18,height:18,borderRadius:4,cursor:"pointer",
+                      border:`1px solid ${actif?cdpCouleur:T.border}`,
+                      background:actif?cdpCouleur:"transparent",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:10,color:actif?"#08080A":T.dim,
+                    }}>{actif?"✓":""}</button>
+                  </div>
+                  {/* Jalon */}
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",
+                      background:ph.couleur,flexShrink:0}}/>
+                    <div>
+                      <div style={{fontSize:12,color:T.text,fontFamily:"'Inter',sans-serif",
+                        fontWeight:500}}>{ph.label}</div>
+                      <div style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>
+                        {ph.pct}% des honoraires · {fmt(Math.round((contrat.honoraires*ph.pct)/100))}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Délai */}
+                  <input type="number" min="0" max="104" disabled={!actif}
+                    value={form[ph.key+"_delai"]||""}
+                    onChange={e=>set(ph.key+"_delai",e.target.value)}
+                    placeholder="0"
+                    style={{background:actif?T.bg:T.card2,
+                      border:`1px solid ${actif?T.border:T.card2}`,
+                      borderRadius:5,padding:"6px 8px",color:T.text,fontSize:13,
+                      fontFamily:"'JetBrains Mono',monospace",width:"100%",
+                      textAlign:"center"}}/>
+                  {/* Retard */}
+                  <input type="number" min="0" max="52" disabled={!actif}
+                    value={form[ph.key+"_retard"]||""}
+                    onChange={e=>set(ph.key+"_retard",e.target.value)}
+                    placeholder="0"
+                    style={{background:form[ph.key+"_retard"]>0?`${T.red}18`:actif?T.bg:T.card2,
+                      border:`1px solid ${form[ph.key+"_retard"]>0?T.red:actif?T.border:T.card2}`,
+                      borderRadius:5,padding:"6px 8px",
+                      color:form[ph.key+"_retard"]>0?T.red:T.text,
+                      fontSize:13,fontFamily:"'JetBrains Mono',monospace",
+                      width:"100%",textAlign:"center"}}/>
+                  {/* Statut */}
+                  <div>
+                    {statut ? (
+                      <Tag c={statut==="valide"?T.green:statut==="soumis"?T.orange:T.red} sm>
+                        {statut==="valide"?"✓":statut==="soumis"?"⏳":"↩"}
+                        {" "}{statut==="valide"?"Validé":statut==="soumis"?"Soumis":"Révision"}
+                      </Tag>
+                    ) : (
+                      <span style={{fontSize:10,color:T.dim,
+                        fontFamily:"'JetBrains Mono',monospace"}}>—</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Bouton soumettre */}
+          <div style={{marginTop:16,display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <button onClick={onClose} style={{
+              padding:"10px 22px",borderRadius:7,border:`1px solid ${T.border}`,
+              background:"transparent",color:T.sub,fontSize:13,cursor:"pointer",
+              fontFamily:"'Inter',sans-serif"}}>Annuler</button>
+            <button onClick={handleSoumettre} disabled={!form.dateDebut||saving} style={{
+              padding:"10px 28px",borderRadius:7,border:"none",
+              background:form.dateDebut?cdpCouleur:T.border,
+              color:form.dateDebut?"#08080A":T.dim,
+              fontSize:13,fontWeight:600,cursor:form.dateDebut?"pointer":"not-allowed",
+              fontFamily:"'Inter',sans-serif",opacity:saving?0.7:1}}>
+              {saving?"Envoi...":statutGlobal==="soumis"?"↻ Resoumettre":"⬆ Soumettre pour validation"}
+            </button>
+          </div>
+        </div>
+
+        {/* Colonne droite — aperçu dates */}
+        {preview && (
+          <div>
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,
+              overflow:"hidden",position:"sticky",top:0}}>
+              <div style={{padding:"11px 16px",borderBottom:`1px solid ${T.border}`,
+                fontSize:9,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
+                letterSpacing:".08em",textTransform:"uppercase"}}>
+                Aperçu calendrier
+              </div>
+              {!form.dateDebut ? (
+                <div style={{padding:24,textAlign:"center",fontSize:12,color:T.dim}}>
+                  Saisissez une date de démarrage
+                </div>
+              ) : dates.length===0 ? (
+                <div style={{padding:24,textAlign:"center",fontSize:12,color:T.dim}}>
+                  Activez au moins un jalon
+                </div>
+              ) : (
+                dates.map((ph,i)=>(
+                  <div key={ph.key} style={{
+                    padding:"11px 16px",
+                    borderBottom:i<dates.length-1?`1px solid ${T.border}`:"none",
+                  }}>
+                    <div style={{display:"flex",alignItems:"center",
+                      justifyContent:"space-between",marginBottom:3}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                        <div style={{width:5,height:5,borderRadius:"50%",background:ph.couleur}}/>
+                        <span style={{fontSize:11,color:T.text,fontFamily:"'Inter',sans-serif",
+                          fontWeight:500}}>{ph.label}</span>
+                      </div>
+                      <Tag c={ph.couleur} sm>{ph.pct}%</Tag>
+                    </div>
+                    <div style={{display:"flex",gap:16,paddingLeft:12}}>
+                      <div>
+                        <div style={{fontSize:8,color:T.dim,letterSpacing:".05em",textTransform:"uppercase",
+                          fontFamily:"'JetBrains Mono',monospace",marginBottom:1}}>Livraison</div>
+                        <div style={{fontSize:11,color:ph.couleur,fontFamily:"'JetBrains Mono',monospace",
+                          fontWeight:600}}>{ph.date_echeance}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:8,color:T.dim,letterSpacing:".05em",textTransform:"uppercase",
+                          fontFamily:"'JetBrains Mono',monospace",marginBottom:1}}>Encaissement</div>
+                        <div style={{fontSize:11,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>
+                          {ph.date_paiement}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:8,color:T.dim,letterSpacing:".05em",textTransform:"uppercase",
+                          fontFamily:"'JetBrains Mono',monospace",marginBottom:1}}>Montant</div>
+                        <div style={{fontSize:11,color:T.text,fontFamily:"'JetBrains Mono',monospace"}}>
+                          {fmt(ph.montant)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+              {dates.length>0&&(
+                <div style={{padding:"10px 16px",background:T.surface,
+                  borderTop:`1px solid ${T.border}`,
+                  display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:10,color:T.sub}}>Total honoraires</span>
+                  <span style={{fontSize:13,color:T.gold,fontFamily:"'JetBrains Mono',monospace",
+                    fontWeight:700}}>{fmt(dates.reduce((s,e)=>s+e.montant,0))}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PageTechnique({contrats, setContrats, roleId, roles}) {
   const [selected,   setSelected]   = useState(null);
+  const [planning,   setPlanning]   = useState(null); // contrat en cours de planification
   const [filtreType, setFiltreType] = useState("Tous");
   const [filtrePhase,setFiltrePhase]= useState("Toutes");
   const [filtreAvan, setFiltreAvan] = useState("Tous");
@@ -2208,6 +2537,33 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
     });
   };
 
+  // Sauvegarder le planning CDP (date démarrage + délais par jalon)
+  const savePlanning = async (contratId, updates) => {
+    const {date_debut_cdp, modalites, planning_global_statut} = updates;
+    setContrats(prev=>prev.map(c=>{
+      if(c.id!==contratId) return c;
+      const newC = {...c, modalites, planning_global_statut,
+        date_debut_cdp,
+        echeances: mkEcheances({...c, modalites, date_debut: date_debut_cdp||c.date_debut})};
+      // Upsert Supabase
+      sb.from("contrats").upsert({
+        id: contratId,
+        modalites: JSON.stringify(modalites),
+        planning_global_statut,
+        date_debut_cdp,
+      }).catch(e=>console.warn("planning save:",e.message));
+      sb.from("audit_log").insert({
+        user_name: roleId,
+        action: "PLANNING_SOUMIS",
+        table_name: "contrats",
+        record_id: String(contratId),
+        context: `Planning soumis pour validation — ${c.ref}`,
+        new_value: {date_debut_cdp, planning_global_statut},
+      }).catch(()=>{});
+      return newC;
+    }));
+  };
+
   const typesDispos  = ["Tous",...new Set(contratsFiltresParRole.map(c=>c.type))];
   const avanOptions  = ["Tous","Non démarré","En cours","Avancé (>60%)","Terminé"];
 
@@ -2225,6 +2581,18 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
        !c.ref.toLowerCase().includes(recherche.toLowerCase())) return false;
     return true;
   });
+
+  // Page planification CDP
+  if(planning){
+    const fresh = contrats.find(c=>c.id===planning.id)||planning;
+    return <PagePlanification
+      contrat={fresh}
+      onClose={()=>setPlanning(null)}
+      onSave={savePlanning}
+      cdpCouleur={cdpCouleur}
+      cdpId={roleId}
+    />;
+  }
 
   // Détail projet sélectionné
   if(selected){
@@ -2429,6 +2797,27 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
                 )}
               </div>
 
+              {/* Bouton Planifier CDP */}
+              {isCdP && (
+                <button onClick={e=>{e.stopPropagation();setPlanning(c);}} style={{
+                  flexShrink:0,padding:"7px 12px",borderRadius:6,
+                  background:c.planning_global_statut==="valide"?`${T.green}18`:
+                             c.planning_global_statut==="soumis"?`${T.orange}18`:
+                             `${cdpCouleur}10`,
+                  border:`1px solid ${c.planning_global_statut==="valide"?T.green:
+                          c.planning_global_statut==="soumis"?T.orange:cdpCouleur}40`,
+                  color:c.planning_global_statut==="valide"?T.green:
+                        c.planning_global_statut==="soumis"?T.orange:cdpCouleur,
+                  fontSize:10,cursor:"pointer",
+                  fontFamily:"'JetBrains Mono',monospace",
+                  display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                }}>
+                  <span style={{fontSize:14}}>📅</span>
+                  <span>{c.planning_global_statut==="valide"?"✓ Planifié":
+                         c.planning_global_statut==="soumis"?"⏳ Soumis":
+                         "Planifier"}</span>
+                </button>
+              )}
               <div style={{color:T.dim,fontSize:18,flexShrink:0}}>›</div>
             </div>
           );
@@ -2478,7 +2867,7 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
       {/* Onglets */}
       <div style={{display:"flex",gap:0,marginBottom:22,borderRadius:7,
         overflow:"hidden",border:`1px solid ${T.border}`,width:"fit-content"}}>
-        {[{id:"acces",label:"Profils & PINs"},{id:"affectation",label:"Affectation projets"},{id:"journal",label:"📋 Journal"}].map((o,i,arr)=>(
+        {[{id:"acces",label:"Profils & PINs"},{id:"affectation",label:"Affectation projets"},{id:"journal",label:"📋 Journal"},{id:"planning",label:"✅ Planning"}].map((o,i,arr)=>(
           <button key={o.id} onClick={()=>setOnglet(o.id)} style={{
             padding:"9px 22px",background:onglet===o.id?T.gold:T.surface,
             color:onglet===o.id?"#08080A":T.sub,border:"none",
@@ -2627,6 +3016,140 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
         que ses projets affectés. Les retards saisis remontent automatiquement au RAF (prévisionnel)
         et à l'Architecte (dashboard) sans exposer les données financières au service technique.
       </div>
+
+      {/* ─── ONGLET VALIDATION PLANNING ─── */}
+      {onglet==="planning"&&(
+        <div>
+          <div style={{fontSize:12,color:T.sub,marginBottom:16}}>
+            Plannings soumis par les chefs de projet en attente de validation.
+          </div>
+          {contrats.filter(c=>c.planning_global_statut==="soumis"||c.planning_global_statut==="valide").length===0 ? (
+            <div style={{textAlign:"center",padding:40,color:T.dim,fontSize:12,
+              fontFamily:"'JetBrains Mono',monospace"}}>
+              Aucun planning soumis pour le moment
+            </div>
+          ) : (
+            contrats
+              .filter(c=>c.planning_global_statut==="soumis"||c.planning_global_statut==="valide")
+              .map(c=>{
+                const cdp = c.cdpId ? roles[c.cdpId] : null;
+                const echs = calcDatesCDP(c);
+                const isValide = c.planning_global_statut==="valide";
+                return (
+                  <div key={c.id} style={{background:T.card,border:`1px solid ${isValide?T.green+"40":T.orange+"40"}`,
+                    borderRadius:9,padding:"16px 18px",marginBottom:14}}>
+                    {/* Header */}
+                    <div style={{display:"flex",justifyContent:"space-between",
+                      alignItems:"flex-start",marginBottom:14,flexWrap:"wrap",gap:10}}>
+                      <div>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,
+                            color:T.goldDk}}>{c.ref}</span>
+                          <Tag c={isValide?T.green:T.orange}>
+                            {isValide?"✓ Validé":"⏳ En attente validation"}
+                          </Tag>
+                          {cdp&&<Tag c={cdp.couleur} sm>{cdp.label}</Tag>}
+                        </div>
+                        <div style={{fontSize:15,fontWeight:600,color:T.text,
+                          fontFamily:"'Inter',sans-serif"}}>{c.nom}</div>
+                        <div style={{fontSize:11,color:T.sub,marginTop:2}}>
+                          Démarrage : <span style={{color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>
+                            {c.date_debut_cdp||"—"}</span>
+                          {" · "}Durée totale : <span style={{color:T.text}}>
+                            {semToLabel(echs.reduce((s,e)=>s+(e.delai_cdp||0)+(e.retard_cdp||0),0))}
+                          </span>
+                        </div>
+                      </div>
+                      {!isValide && (
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>{
+                            setContrats(prev=>prev.map(ct=>{
+                              if(ct.id!==c.id) return ct;
+                              const newMod = {...ct.modalites};
+                              Object.keys(newMod).forEach(k=>{
+                                if(newMod[k]?.planning_statut==="soumis")
+                                  newMod[k]={...newMod[k],planning_statut:"revision"};
+                              });
+                              sb.from("contrats").upsert({id:ct.id,
+                                planning_global_statut:"revision",
+                                modalites:JSON.stringify(newMod)}).catch(()=>{});
+                              return {...ct,modalites:newMod,planning_global_statut:"revision"};
+                            }));
+                          }} style={{padding:"8px 16px",borderRadius:6,border:`1px solid ${T.red}40`,
+                            background:"transparent",color:T.red,fontSize:12,cursor:"pointer",
+                            fontFamily:"'Inter',sans-serif"}}>↩ Révision</button>
+                          <button onClick={()=>{
+                            setContrats(prev=>prev.map(ct=>{
+                              if(ct.id!==c.id) return ct;
+                              const newMod = {...ct.modalites};
+                              Object.keys(newMod).forEach(k=>{
+                                if(newMod[k]?.planning_statut==="soumis")
+                                  newMod[k]={...newMod[k],planning_statut:"valide"};
+                              });
+                              sb.from("contrats").upsert({id:ct.id,
+                                planning_global_statut:"valide",
+                                modalites:JSON.stringify(newMod)}).catch(()=>{});
+                              sb.from("audit_log").insert({user_name:"ADMIN",
+                                action:"PLANNING_VALIDE",table_name:"contrats",
+                                record_id:String(ct.id),
+                                context:`Planning validé — ${ct.ref}`,
+                                new_value:{planning_global_statut:"valide"}}).catch(()=>{});
+                              return {...ct,modalites:newMod,planning_global_statut:"valide",
+                                echeances:calcDatesCDP({...ct,modalites:newMod})};
+                            }));
+                          }} style={{padding:"8px 18px",borderRadius:6,border:"none",
+                            background:T.green,color:"#08080A",fontSize:12,fontWeight:600,
+                            cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>✓ Valider</button>
+                        </div>
+                      )}
+                    </div>
+                    {/* Tableau jalons */}
+                    <div style={{background:T.surface,border:`1px solid ${T.border}`,
+                      borderRadius:7,overflow:"hidden"}}>
+                      <div style={{display:"grid",
+                        gridTemplateColumns:"1fr 80px 80px 120px 120px 100px",
+                        gap:8,padding:"8px 14px",background:T.card2,
+                        borderBottom:`1px solid ${T.border}`}}>
+                        {["Jalon","Délai","Retard","Livraison prévue","Encaissement","Montant"].map(h=>(
+                          <div key={h} style={{fontSize:9,color:T.dim,
+                            fontFamily:"'JetBrains Mono',monospace",
+                            letterSpacing:".06em",textTransform:"uppercase"}}>{h}</div>
+                        ))}
+                      </div>
+                      {echs.filter(e=>e.phase_active_cdp!==false&&PHASES_SUIVI.includes(e.key)).map((e,i,arr)=>(
+                        <div key={e.key} style={{
+                          display:"grid",
+                          gridTemplateColumns:"1fr 80px 80px 120px 120px 100px",
+                          gap:8,padding:"9px 14px",
+                          borderBottom:i<arr.length-1?`1px solid ${T.border}`:"none",
+                          alignItems:"center"
+                        }}>
+                          <div style={{display:"flex",alignItems:"center",gap:7}}>
+                            <div style={{width:5,height:5,borderRadius:"50%",background:e.couleur}}/>
+                            <span style={{fontSize:12,color:T.text}}>{e.label}</span>
+                          </div>
+                          <span style={{fontSize:11,color:T.sub,
+                            fontFamily:"'JetBrains Mono',monospace"}}>{e.delai_cdp||0} sem</span>
+                          <span style={{fontSize:11,
+                            color:e.retard_cdp>0?T.red:T.dim,
+                            fontFamily:"'JetBrains Mono',monospace"}}>
+                            {e.retard_cdp>0?`+${e.retard_cdp}s`:"—"}
+                          </span>
+                          <span style={{fontSize:11,color:e.couleur,
+                            fontFamily:"'JetBrains Mono',monospace"}}>{e.date_echeance||"—"}</span>
+                          <span style={{fontSize:11,color:T.gold,
+                            fontFamily:"'JetBrains Mono',monospace"}}>{e.date_paiement||"—"}</span>
+                          <span style={{fontSize:11,color:T.text,
+                            fontFamily:"'JetBrains Mono',monospace"}}>{fmt(e.montant)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+          )}
+        </div>
+      )}
 
       {/* ─── ONGLET JOURNAL ─── */}
       {onglet==="journal"&&(
@@ -3147,8 +3670,18 @@ function PageRentabilite({contrats, charges, roles}) {
    PAGE PRÉVISIONNEL
 ═══════════════════════════════════════════════════════════ */
 function PagePrevisionnel({contrats, charges}) {
-  const allEch = contrats.flatMap(c=>(c.echeances||[]).map(e=>({...e,cNom:c.nom,cRef:c.ref_interne||c.ref})))
-    .sort((a,b)=>(a.date_paiement||"").localeCompare(b.date_paiement||""));
+  // Pour les contrats avec planning CDP validé → utiliser les dates recalculées
+  const allEch = contrats.flatMap(c=>{
+    const echs = c.planning_global_statut==="valide"
+      ? calcDatesCDP(c)
+      : (c.echeances||[]);
+    return echs.map(e=>({...e,cNom:c.nom,cRef:c.ref_interne||c.ref,
+      planning_valide: c.planning_global_statut==="valide"}));
+  }).sort((a,b)=>(a.date_paiement||"").localeCompare(b.date_paiement||""));
+  
+  // Badge : combien de contrats ont un planning validé
+  const nPlanifies = contrats.filter(c=>c.planning_global_statut==="valide").length;
+  const nEnAttente = contrats.filter(c=>c.planning_global_statut==="soumis").length;
   const chargeM = charges.reduce((s,c)=>s+c.mnt,0);
 
   const cfByM={};
@@ -3175,10 +3708,34 @@ function PagePrevisionnel({contrats, charges}) {
 
   return (
     <div style={{animation:"fadeIn .3s ease"}}>
-      <div style={{marginBottom:22}}>
+      <div style={{marginBottom:18}}>
         <h2 style={{fontFamily:"'Inter',sans-serif",fontSize:22,color:T.text,fontWeight:600,letterSpacing:'-.01em'}}>Prévisionnel Financier</h2>
         <p style={{color:T.sub,fontSize:13,marginTop:3}}>Généré automatiquement depuis les contrats & livrables</p>
       </div>
+      
+      {/* Bandeau statut plannings */}
+      {(nPlanifies>0||nEnAttente>0)&&(
+        <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+          {nPlanifies>0&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",
+              background:`${T.green}10`,border:`1px solid ${T.green}30`,borderRadius:7}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:T.green}}/>
+              <span style={{fontSize:12,color:T.green}}>
+                <strong>{nPlanifies}</strong> contrat{nPlanifies>1?"s":""} avec planning CDP validé — dates réelles
+              </span>
+            </div>
+          )}
+          {nEnAttente>0&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",
+              background:`${T.orange}10`,border:`1px solid ${T.orange}30`,borderRadius:7}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:T.orange}}/>
+              <span style={{fontSize:12,color:T.orange}}>
+                <strong>{nEnAttente}</strong> planning{nEnAttente>1?"s":""} en attente de validation Admin
+              </span>
+            </div>
+          )}
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
         {[
           {l:"Encaissé",a:T.green,v:fmt(payé)},
@@ -3246,6 +3803,9 @@ function PagePrevisionnel({contrats, charges}) {
                   <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:T.gold}}>{e.date_paiement}</td>
                   <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:T.gold,whiteSpace:"nowrap"}}>{fmt(e.montant)}</td>
                   <td style={{padding:"9px 13px"}}>
+                    {e.planning_valide&&!e.paiement_recu&&!e.facture_emise&&(
+                      <Tag c={T.teal} sm>📅 CDP</Tag>
+                    )}
                     <Tag c={e.paiement_recu?T.green:e.facture_emise?T.orange:e.retard>0?T.red:T.blue} sm>
                       {e.paiement_recu?"Payé":e.facture_emise?"Facturé":e.retard>0?"Retard":"Planifié"}
                     </Tag>
