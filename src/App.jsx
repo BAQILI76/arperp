@@ -2889,7 +2889,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
   );
 }
 
-function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert}) {
+function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert, sendNotif}) {
   const [selected,   setSelected]   = useState(null);
   const [planning,   setPlanning]   = useState(null); // contrat en cours de planification
   const [filtreType, setFiltreType] = useState("Tous");
@@ -2945,15 +2945,14 @@ function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert}) {
             context: `Planning soumis — démarrage ${date_debut_cdp}`,
             new_value: {date_debut_cdp, planning_global_statut},
           }).then(()=>{}).catch(()=>{});
-          // Notifier Admin
-          sb.from("notifications").insert({
+          // Notifier Admin via sendNotif (met à jour state + Supabase)
+          if(sendNotif) sendNotif({
             destinataire:"ADMIN",type:"PLANNING_SOUMIS",
             contrat_id:String(contratId),
             contrat_ref:updated?.ref||"",contrat_nom:updated?.nom||"",
             message:`Planning soumis par ${roleId} — ${updated?.ref||""} · démarrage ${date_debut_cdp}`,
-            action_url:"plannings",priorite:"haute",lu:false,
-            created_at:new Date().toISOString()
-          }).then(()=>{}).catch(()=>{});
+            action_url:"plannings",priorite:"haute",
+          });
         }, 100);
       }
       return next;
@@ -4426,6 +4425,7 @@ const TABS_CONFIG = {
   plannings:    { label:"Plannings CDP",    icon:"◇" },
   equipe:       { label:"Équipe & Accès",   icon:"⬡" },
   journal:      { label:"Journal",          icon:"◉" },
+  administration:{ label:"Administration",  icon:"⬡" },
   // Legacy
   dashboard_raf:{ label:"Dashboard",        icon:"◈" },
   rentabilite:  { label:"Rentabilité",      icon:"◎" },
@@ -4754,7 +4754,7 @@ export default function App() {
                 {label:null, tabs:["notifs","dashboard"]},
                 {label:"RAF — Finances", tabs:["contrats","previsionnel","facturation","charges","indicateurs"]},
                 {label:"CDP — Technique", tabs:["technique","plannings"]},
-                {label:"Administration", tabs:["equipe","journal"]},
+                {label:"Administration", tabs:["administration"]},
               ] : isRAF ? [
                 {label:null, tabs:["notifs"]},
                 {label:"Finances", tabs:["contrats","previsionnel","facturation","charges","indicateurs"]},
@@ -4809,21 +4809,7 @@ export default function App() {
             })()}
           </nav>
 
-          {/* Barème */}
-          <div style={{padding:"10px 14px",borderTop:`1px solid ${T.border}`}}>
-            <div style={{fontSize:8,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
-              letterSpacing:".1em",marginBottom:7,textTransform:"uppercase"}}>Jalons</div>
-            {PHASES_DEF.map(ph=>(
-              <div key={ph.key} style={{display:"flex",justifyContent:"space-between",
-                marginBottom:2,alignItems:"center"}}>
-                <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                  <div style={{width:5,height:5,borderRadius:"50%",background:ph.couleur,flexShrink:0}}/>
-                  <span style={{fontSize:9,color:T.dim}}>{ph.label.split(" ").slice(0,2).join(" ")}</span>
-                </div>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:ph.couleur}}>{ph.pct}%</span>
-              </div>
-            ))}
-          </div>
+
 
           {/* Déconnexion */}
           <button onClick={() => setShowLogoutConfirm(true)}
@@ -4869,6 +4855,9 @@ export default function App() {
           {tab==="journal"&&
             <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
               sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="journal"/>}
+          {tab==="administration"&&
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="acces"/>}
           {tab==="clients"&&
             <PageClients clients={clients} setClients={setClients} contrats={contrats}/>}
           {tab==="rentabilite"&&
