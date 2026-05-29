@@ -2554,23 +2554,33 @@ function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert}) {
   // Sauvegarder le planning CDP (date démarrage + délais par jalon)
   const savePlanning = (contratId, updates) => {
     const {date_debut_cdp, modalites, planning_global_statut} = updates;
-    setContrats(prev=>prev.map(c=>{
-      if(c.id!==contratId) return c;
-      const newC = {...c, modalites, planning_global_statut,
-        date_debut_cdp,
-        echeances: mkEcheances({...c, modalites, date_debut_cdp, date_debut: date_debut_cdp||c.date_debut})};
-      // Sauvegarde Supabase via sbUpsert (structure {id, data})
-      sbUpsert("contrats", newC);
-      sb.from("audit_log").insert({
-        user_name: roleId,
-        action: "PLANNING_SOUMIS",
-        table_name: "contrats",
-        record_id: String(contratId),
-        context: `Planning soumis — ${c.ref} — démarrage ${date_debut_cdp}`,
-        new_value: {date_debut_cdp, planning_global_statut},
-      }).then(()=>{}).catch(()=>{});
-      return newC;
-    }));
+    // Trouver le contrat courant pour construire newC hors du setContrats
+    setContrats(prev=>{
+      const next = prev.map(c=>{
+        if(c.id!==contratId) return c;
+        const newC = {...c, modalites, planning_global_statut,
+          date_debut_cdp,
+          echeances: mkEcheances({...c, modalites, date_debut_cdp,
+            date_debut: date_debut_cdp||c.date_debut})};
+        return newC;
+      });
+      // Appeler sbUpsert APRES le map, avec le contrat mis à jour
+      const updated = next.find(c=>c.id===contratId);
+      if(updated) {
+        setTimeout(()=>{
+          sbUpsert("contrats", updated);
+          sb.from("audit_log").insert({
+            user_name: roleId,
+            action: "PLANNING_SOUMIS",
+            table_name: "contrats",
+            record_id: String(contratId),
+            context: `Planning soumis — démarrage ${date_debut_cdp}`,
+            new_value: {date_debut_cdp, planning_global_statut},
+          }).then(()=>{}).catch(()=>{});
+        }, 100);
+      }
+      return next;
+    });
   };
 
   const typesDispos  = ["Tous",...new Set(contratsFiltresParRole.map(c=>c.type))];
@@ -3087,28 +3097,32 @@ function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert}) {
                             background:"transparent",color:T.red,fontSize:12,cursor:"pointer",
                             fontFamily:"'Inter',sans-serif"}}>↩ Révision</button>
                           <button onClick={()=>{
-                            setContrats(prev=>prev.map(ct=>{
-                              if(ct.id!==c.id) return ct;
-                              const newMod = {...ct.modalites};
-                              Object.keys(newMod).forEach(k=>{
-                                if(newMod[k]?.planning_statut==="soumis")
-                                  newMod[k]={...newMod[k],planning_statut:"valide"};
+                            setContrats(prev=>{
+                              const next = prev.map(ct=>{
+                                if(ct.id!==c.id) return ct;
+                                const newMod = {...ct.modalites};
+                                Object.keys(newMod).forEach(k=>{
+                                  if(newMod[k]?.planning_statut==="soumis")
+                                    newMod[k]={...newMod[k],planning_statut:"valide"};
+                                });
+                                newMod["_planning_global_statut"] = "valide";
+                                newMod["_date_debut_cdp"] = ct.date_debut_cdp || ct.modalites?.["_date_debut_cdp"] || "";
+                                const updatedCt = {...ct, modalites:newMod,
+                                  planning_global_statut:"valide",
+                                  date_debut_cdp: ct.date_debut_cdp || newMod["_date_debut_cdp"]};
+                                return {...updatedCt, echeances:calcDatesCDP(updatedCt)};
                               });
-                              // Stocker planning_global_statut + date_debut_cdp dans modalites
-                              newMod["_planning_global_statut"] = "valide";
-                              newMod["_date_debut_cdp"] = ct.date_debut_cdp || ct.modalites?.["_date_debut_cdp"] || "";
-                              sb.from("audit_log").insert({user_name:"ADMIN",
-                                action:"PLANNING_VALIDE",table_name:"contrats",
-                                record_id:String(ct.id),
-                                context:`Planning validé — ${ct.ref}`,
-                                new_value:{planning_global_statut:"valide"}}).then(()=>{}).catch(()=>{});
-                              const updatedCt = {...ct, modalites:newMod,
-                                planning_global_statut:"valide",
-                                date_debut_cdp: ct.date_debut_cdp || newMod["_date_debut_cdp"]};
-                              const finalCt = {...updatedCt, echeances:calcDatesCDP(updatedCt)};
-                              sbUpsert("contrats", finalCt);
-                              return finalCt;
-                            }));
+                              const finalCt = next.find(ct=>ct.id===c.id);
+                              if(finalCt) setTimeout(()=>{
+                                sbUpsert("contrats", finalCt);
+                                sb.from("audit_log").insert({user_name:"ADMIN",
+                                  action:"PLANNING_VALIDE",table_name:"contrats",
+                                  record_id:String(finalCt.id),
+                                  context:`Planning validé — ${finalCt.ref}`,
+                                  new_value:{planning_global_statut:"valide"}}).then(()=>{}).catch(()=>{});
+                              }, 100);
+                              return next;
+                            });
                           }} style={{padding:"8px 18px",borderRadius:6,border:"none",
                             background:T.green,color:"#08080A",fontSize:12,fontWeight:600,
                             cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>✓ Valider</button>
