@@ -178,19 +178,42 @@ const mkEcheances = (contrat) => {
 
 /* ─── Calcul dates depuis planning CDP validé ─────── */
 const calcDatesCDP = (contrat) => {
-  const dateStart = contrat.date_debut_cdp || contrat.date_debut;
+  // Priorité : date saisie par CDP, sinon date contrat
+  const dateStart = contrat.date_debut_cdp
+    || contrat.modalites?.["_date_debut_cdp"]
+    || contrat.date_debut;
   if(!dateStart) return contrat.echeances||[];
+  
   let cursor = dateStart;
-  return (contrat.echeances||[]).map(ph => {
-    if(!ph.phase_active_cdp) return ph;
-    const delai = ph.delai_cdp || ph.duree || 0;
-    const retard = (ph.retard_statut==="valide" ? ph.retard_cdp : 0) || ph.retard || 0;
+  
+  // Recalculer depuis les modalites directement (source de vérité)
+  return PHASES_DEF.map(ph => {
+    const ov = contrat.modalites?.[ph.key] || {};
+    const actif = ov.phase_active_cdp !== false && ov.actif !== false;
+    if(!actif) return null;
+    
+    const delai  = ov.delai_cdp  || ov.duree  || 0;
+    const retard = ov.retard_cdp || ov.retard || 0;
+    const pctV   = ov.pct !== undefined ? ov.pct : ph.pct;
+    const montant = Math.round(((contrat.honoraires||0) * pctV) / 100);
+    
     const date_echeance = addW(cursor, delai + retard);
     const date_paiement = addD(date_echeance, contrat.delai_paiement||14);
-    const result = {...ph, date_debut:cursor, date_echeance, date_paiement};
+    
+    const result = {
+      key: ph.key, label: ph.label, couleur: ph.couleur,
+      pct: pctV, delai_cdp: delai, retard_cdp: retard, montant,
+      date_debut: cursor, date_echeance, date_paiement,
+      livree:        ov.livree||false,
+      facture_emise: ov.facture_emise||false,
+      paiement_recu: ov.paiement_recu||false,
+      avancement:    ov.avancement||0,
+      planning_statut: ov.planning_statut||null,
+      phase_active_cdp: actif,
+    };
     cursor = date_echeance;
     return result;
-  });
+  }).filter(Boolean);
 };
 
 /* ═══════════════════════════════════════════════════════════
