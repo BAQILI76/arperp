@@ -1895,7 +1895,7 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
         record_id:  String(contrat.id),
         context:    `Avancement sauvegardé — ${contrat.ref} · ${Object.keys(draft).join(", ")}`,
         new_value:  draft,
-      }).catch(()=>{});
+      }).then(()=>{}).catch(()=>{});
     } catch(e) { console.warn("saveAll:", e); }
     setDraft({});
     setHasDraft(false);
@@ -4154,7 +4154,7 @@ export default function App() {
             record_id:  Date.now().toString(),
             context:    `Connexion — ${roleId} — ${new Date().toLocaleString("fr-MA")}`,
             new_value:  { role: roleId, ts: new Date().toISOString() },
-          }).catch(() => {});
+          }).then(()=>{}).catch(()=>{});
         }
       }).catch(e => console.warn("Supabase Auth:", e.message));
     }
@@ -4180,7 +4180,7 @@ export default function App() {
         new_value:  snapshot,
       });
     } catch(e) { console.warn("audit_log:", e.message); }
-    sb.auth.signOut().catch(() => {});
+    sb.auth.signOut().then(()=>{}).catch(()=>{});
     setRole(null);
     setTab(null);
   };
