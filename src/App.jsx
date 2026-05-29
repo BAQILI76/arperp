@@ -3290,7 +3290,7 @@ function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert, sendNoti
 /* ═══════════════════════════════════════════════════════════
    PAGE ADMIN — ACCÈS + AFFECTATION PROJETS
 ═══════════════════════════════════════════════════════════ */
-function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert, sendNotif, defaultOnglet}) {
+function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert, sendNotif, defaultOnglet, setTab}) {
   const [editPin, setEditPin] = useState({});
   const [editNom, setEditNom] = useState({});
   const [onglet, setOnglet]   = useState(defaultOnglet||"acces"); // "acces" | "affectation" | "journal"
@@ -3480,8 +3480,17 @@ function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert, sendNotif,
       {/* ─── ONGLET VALIDATION PLANNING ─── */}
       {onglet==="planning"&&(
         <div>
-          <div style={{fontSize:12,color:T.sub,marginBottom:16}}>
-            Plannings soumis par les chefs de projet en attente de validation.
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
+            <div style={{fontSize:12,color:T.sub}}>
+              Plannings soumis par les chefs de projet en attente de validation.
+            </div>
+            {/* Bouton retour notifications */}
+            <button onClick={()=>setTab&&setTab("notifs")}
+              style={{padding:"7px 14px",borderRadius:6,border:`1px solid ${T.border}`,
+                background:"transparent",color:T.sub,fontSize:12,cursor:"pointer",
+                fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>
+              ← Retour aux notifications
+            </button>
           </div>
           {contrats.filter(c=>c.planning_global_statut==="soumis"||c.planning_global_statut==="valide").length===0 ? (
             <div style={{textAlign:"center",padding:40,color:T.dim,fontSize:12,
@@ -4913,16 +4922,16 @@ export default function App() {
             <PageRentabilite contrats={contrats} charges={charges} roles={roles}/>}
           {tab==="plannings"&&
             <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
-              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="planning"/>}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="planning" setTab={setTab}/>}
           {tab==="equipe"&&
             <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
-              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="acces"/>}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="acces" setTab={setTab}/>}
           {tab==="journal"&&
             <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
-              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="journal"/>}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="journal" setTab={setTab}/>}
           {tab==="administration"&&
             <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
-              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="acces"/>}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="acces" setTab={setTab}/>}
           {tab==="clients"&&
             <PageClients clients={clients} setClients={setClients} contrats={contrats}/>}
           {tab==="rentabilite"&&
