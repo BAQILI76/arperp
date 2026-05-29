@@ -2262,9 +2262,12 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
         planning_statut:  "soumis",
       };
     });
+    // Stocker statut et date dans modalites pour persistance Supabase
+    newModalites["_date_debut_cdp"]         = form.dateDebut;
+    newModalites["_planning_global_statut"] = "soumis";
     onSave(contrat.id, {
-      date_debut_cdp: form.dateDebut,
-      modalites: newModalites,
+      date_debut_cdp:         form.dateDebut,
+      modalites:              newModalites,
       planning_global_statut: "soumis",
     });
     setSaving(false);
@@ -2532,7 +2535,7 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
       if(c.id!==contratId) return c;
       const newC = {...c, modalites, planning_global_statut,
         date_debut_cdp,
-        echeances: mkEcheances({...c, modalites, date_debut: date_debut_cdp||c.date_debut})};
+        echeances: mkEcheances({...c, modalites, date_debut_cdp, date_debut: date_debut_cdp||c.date_debut})};
       // Sauvegarde Supabase — modalites uniquement (colonne existante)
       sb.from("contrats").update({
         modalites: modalites,
@@ -3069,14 +3072,19 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                                 if(newMod[k]?.planning_statut==="soumis")
                                   newMod[k]={...newMod[k],planning_statut:"valide"};
                               });
+                              // Stocker planning_global_statut + date_debut_cdp dans modalites
+                              newMod["_planning_global_statut"] = "valide";
+                              newMod["_date_debut_cdp"] = ct.date_debut_cdp || ct.modalites?.["_date_debut_cdp"] || "";
                               sb.from("contrats").update({modalites:newMod}).eq("id",ct.id).then(()=>{}).catch(()=>{});
                               sb.from("audit_log").insert({user_name:"ADMIN",
                                 action:"PLANNING_VALIDE",table_name:"contrats",
                                 record_id:String(ct.id),
                                 context:`Planning validé — ${ct.ref}`,
                                 new_value:{planning_global_statut:"valide"}}).then(()=>{}).catch(()=>{});
-                              return {...ct,modalites:newMod,planning_global_statut:"valide",
-                                echeances:calcDatesCDP({...ct,modalites:newMod})};
+                              const updatedCt = {...ct, modalites:newMod,
+                                planning_global_statut:"valide",
+                                date_debut_cdp: ct.date_debut_cdp || newMod["_date_debut_cdp"]};
+                              return {...updatedCt, echeances:calcDatesCDP(updatedCt)};
                             }));
                           }} style={{padding:"8px 18px",borderRadius:6,border:"none",
                             background:T.green,color:"#08080A",fontSize:12,fontWeight:600,
@@ -4110,7 +4118,15 @@ export default function App() {
 
         // Chargement direct avec _set* pour ne PAS déclencher d'upsert
         // (les données viennent déjà de la DB, inutile de les réécrire)
-        _setContrats(!eCt && ct?.length ? ct.map(r => r.data ?? r) : []);
+        _setContrats(!eCt && ct?.length ? ct.map(r => {
+          const c = r.data ?? r;
+          // Restaurer planning_global_statut et date_debut_cdp depuis modalites (persistés en JSONB)
+          const mod = c.modalites || {};
+          const planning_global_statut = mod["_planning_global_statut"] || c.planning_global_statut || null;
+          const date_debut_cdp         = mod["_date_debut_cdp"]         || c.date_debut_cdp         || null;
+          const base = {...c, planning_global_statut, date_debut_cdp};
+          return {...base, echeances: mkEcheances(base)};
+        }) : []);
         _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : []);
         _setCharges( !eCh && ch?.length ? ch.map(r => r.data ?? r) : []);
 
