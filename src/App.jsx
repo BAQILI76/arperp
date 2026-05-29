@@ -54,7 +54,7 @@ const ROLES = {
     id:"ADMIN", label:"Architecte / Gérant", pin:"0000",
     couleur: T.gold, icon:"⬡",
     desc:"Accès complet · Administration · Vision consolidée",
-    tabs:["notifs","dashboard","contrats","previsionnel","facturation","charges","indicateurs","technique","plannings","equipe","journal"],
+    tabs:["notifs","dashboard","contrats","previsionnel","facturation","charges","indicateurs","technique","plannings","administration"],
     isCdP:false,
   },
   RAF: {
@@ -493,11 +493,17 @@ const MiniGantt = ({echeances}) => {
    PAGE NOTIFICATIONS
 ═══════════════════════════════════════════════════════════ */
 function PageNotifications({roleId, roles, contrats, notifications, setNotifications, setTab}) {
+  const [filtre, setFiltre] = useState("toutes"); // "toutes" | "nouvelles" | "lues"
+
   const roleNotifs = notifications.filter(n=>
     n.destinataire===roleId || n.destinataire==="ALL"
   ).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 
   const nonLues = roleNotifs.filter(n=>!n.lu).length;
+
+  const notifsFiltrees = filtre==="nouvelles" ? roleNotifs.filter(n=>!n.lu)
+    : filtre==="lues" ? roleNotifs.filter(n=>n.lu)
+    : roleNotifs;
 
   const marquerLu = (id) => {
     setNotifications(prev=>prev.map(n=>n.id===id?{...n,lu:true}:n));
@@ -508,9 +514,20 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
     setNotifications(prev=>prev.map(n=>
       (n.destinataire===roleId||n.destinataire==="ALL")?{...n,lu:true}:n
     ));
-    roleNotifs.forEach(n=>{
-      sb.from("notifications").update({lu:true}).eq("id",n.id).then(()=>{}).catch(()=>{});
+    roleNotifs.filter(n=>!n.lu).forEach(n=>{
+      if(n.id) sb.from("notifications").update({lu:true}).eq("id",n.id).then(()=>{}).catch(()=>{});
     });
+  };
+
+  const supprimerNotif = (id) => {
+    setNotifications(prev=>prev.filter(n=>n.id!==id));
+    if(id) sb.from("notifications").delete().eq("id",id).then(()=>{}).catch(()=>{});
+  };
+
+  const supprimerToutesLues = () => {
+    const luesIds = roleNotifs.filter(n=>n.lu&&n.id).map(n=>n.id);
+    setNotifications(prev=>prev.filter(n=>!luesIds.includes(n.id)));
+    luesIds.forEach(id=>sb.from("notifications").delete().eq("id",id).then(()=>{}).catch(()=>{}));
   };
 
   const iconType = (type) => {
@@ -532,93 +549,141 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
 
   return (
     <div style={{maxWidth:720}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+      {/* En-tête */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div>
           <h2 style={{fontFamily:"'Inter',sans-serif",fontSize:20,fontWeight:600,color:T.text,letterSpacing:"-.01em"}}>
             Notifications
           </h2>
           <p style={{color:T.sub,fontSize:13,marginTop:3}}>
-            {nonLues>0?`${nonLues} non lue${nonLues>1?"s":""}`:"Tout est à jour ✓"}
+            {nonLues>0
+              ? <span style={{color:T.orange}}>{nonLues} nouvelle{nonLues>1?"s":""}</span>
+              : <span style={{color:T.green}}>Tout est à jour ✓</span>}
+            {" · "}{roleNotifs.length} au total
           </p>
         </div>
-        {nonLues>0&&(
-          <button onClick={marquerToutLu} style={{
-            padding:"8px 16px",borderRadius:6,border:`1px solid ${T.border}`,
-            background:"transparent",color:T.sub,fontSize:12,cursor:"pointer",
-            fontFamily:"'Inter',sans-serif"}}>
-            Tout marquer comme lu
-          </button>
-        )}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {nonLues>0&&(
+            <button onClick={marquerToutLu} style={{
+              padding:"7px 14px",borderRadius:6,border:`1px solid ${T.border}`,
+              background:"transparent",color:T.sub,fontSize:12,cursor:"pointer",
+              fontFamily:"'Inter',sans-serif"}}>
+              ✓ Tout marquer lu
+            </button>
+          )}
+          {roleNotifs.filter(n=>n.lu).length>0&&(
+            <button onClick={supprimerToutesLues} style={{
+              padding:"7px 14px",borderRadius:6,border:`1px solid ${T.red}30`,
+              background:"transparent",color:T.red,fontSize:12,cursor:"pointer",
+              fontFamily:"'Inter',sans-serif"}}>
+              🗑 Supprimer les lues
+            </button>
+          )}
+        </div>
       </div>
 
-      {roleNotifs.length===0?(
+      {/* Filtres */}
+      <div style={{display:"flex",gap:0,marginBottom:16,border:`1px solid ${T.border}`,
+        borderRadius:6,overflow:"hidden",width:"fit-content"}}>
+        {[["toutes","Toutes"],["nouvelles",`Nouvelles (${nonLues})`],["lues","Lues"]].map(([val,label])=>(
+          <button key={val} onClick={()=>setFiltre(val)} style={{
+            padding:"7px 16px",border:"none",fontSize:12,cursor:"pointer",
+            fontFamily:"'Inter',sans-serif",
+            background:filtre===val?T.gold:"transparent",
+            color:filtre===val?"#08080A":T.sub,
+            borderRight:val!=="lues"?`1px solid ${T.border}`:"none",
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {notifsFiltrees.length===0?(
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,
           padding:"48px",textAlign:"center"}}>
-          <div style={{fontSize:28,marginBottom:12}}>✓</div>
-          <div style={{fontSize:14,color:T.sub}}>Aucune notification</div>
+          <div style={{fontSize:28,marginBottom:12}}>
+            {filtre==="nouvelles"?"✓":"📭"}
+          </div>
+          <div style={{fontSize:14,color:T.sub}}>
+            {filtre==="nouvelles"?"Aucune nouvelle notification":"Aucune notification"}
+          </div>
         </div>
       ):(
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,overflow:"hidden"}}>
-          {roleNotifs.map((n,i)=>{
+          {notifsFiltrees.map((n,i)=>{
             const c = colorType(n.type);
             const d = new Date(n.created_at);
             const dateStr = d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});
             const timeStr = d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
             return (
-              <div key={n.id||i} onClick={()=>!n.lu&&marquerLu(n.id||i)}
+              <div key={n.id||i}
                 style={{
                   display:"flex",alignItems:"flex-start",gap:14,
-                  padding:"14px 18px",
-                  borderBottom:i<roleNotifs.length-1?`1px solid ${T.border}`:"none",
-                  background:n.lu?"transparent":`${c}06`,
-                  cursor:n.lu?"default":"pointer",
-                  transition:"background .15s",
+                  padding:"13px 16px",
+                  borderBottom:i<notifsFiltrees.length-1?`1px solid ${T.border}`:"none",
+                  background:n.lu?T.surface:`${c}08`,
+                  opacity:n.lu?0.65:1,
+                  transition:"all .15s",
                 }}>
+                {/* Point indicateur */}
+                <div style={{paddingTop:4,flexShrink:0}}>
+                  {n.lu
+                    ? <div style={{width:7,height:7,borderRadius:"50%",
+                        border:`1px solid ${T.dim}`,background:"transparent"}}/>
+                    : <div style={{width:7,height:7,borderRadius:"50%",background:c}}/>
+                  }
+                </div>
                 {/* Icône */}
                 <div style={{
-                  width:36,height:36,borderRadius:8,flexShrink:0,
-                  background:`${c}15`,border:`1px solid ${c}30`,
+                  width:32,height:32,borderRadius:7,flexShrink:0,
+                  background:n.lu?`${T.border}40`:`${c}15`,
+                  border:`1px solid ${n.lu?T.border:c+"30"}`,
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:16,
+                  fontSize:14,filter:n.lu?"grayscale(1)":"none",
                 }}>{iconType(n.type)}</div>
                 {/* Contenu */}
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
-                    <span style={{fontSize:13,fontWeight:n.lu?400:500,color:T.text,fontFamily:"'Inter',sans-serif"}}>
-                      {n.message}
-                    </span>
-                    {!n.lu&&(
-                      <span style={{width:6,height:6,borderRadius:"50%",background:c,flexShrink:0,display:"inline-block"}}/>
-                    )}
+                  <div style={{fontSize:13,fontWeight:n.lu?400:500,
+                    color:n.lu?T.sub:T.text,fontFamily:"'Inter',sans-serif",
+                    marginBottom:4,lineHeight:1.4}}>
+                    {n.message}
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     {n.contrat_ref&&(
-                      <span style={{fontSize:10,color:T.goldDk,fontFamily:"'JetBrains Mono',monospace"}}>
-                        {n.contrat_ref}
-                      </span>
-                    )}
-                    {n.contrat_nom&&(
-                      <span style={{fontSize:11,color:T.sub}}>{n.contrat_nom}</span>
+                      <span style={{fontSize:10,color:T.goldDk,
+                        fontFamily:"'JetBrains Mono',monospace"}}>{n.contrat_ref}</span>
                     )}
                     <span style={{fontSize:10,color:T.dim}}>{dateStr} · {timeStr}</span>
+                    {n.lu&&<span style={{fontSize:10,color:T.dim,fontStyle:"italic"}}>lue</span>}
                   </div>
-                  {/* Action rapide selon type */}
-                  {n.action_url && !n.lu && (
-                    <button onClick={e=>{e.stopPropagation();marquerLu(n.id||i);setTab(n.action_url);}}
-                      style={{marginTop:8,padding:"5px 12px",borderRadius:5,
+                  {/* Actions */}
+                  <div style={{display:"flex",gap:8,marginTop:6}}>
+                    {!n.lu&&(
+                      <button onClick={()=>marquerLu(n.id||i)} style={{
+                        padding:"4px 10px",borderRadius:4,border:`1px solid ${T.border}`,
+                        background:"transparent",color:T.sub,fontSize:11,cursor:"pointer"}}>
+                        ✓ Marquer lu
+                      </button>
+                    )}
+                    {n.action_url&&!n.lu&&(
+                      <button onClick={()=>{marquerLu(n.id||i);setTab(n.action_url);}} style={{
+                        padding:"4px 10px",borderRadius:4,
                         border:`1px solid ${c}40`,background:`${c}10`,
-                        color:c,fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                      Voir → {n.action_url==="plannings"?"Validation planning":
-                               n.action_url==="previsionnel"?"Prévisionnel":
-                               n.action_url==="technique"?"Suivi technique":""}
-                    </button>
-                  )}
+                        color:c,fontSize:11,cursor:"pointer"}}>
+                        Voir → {n.action_url==="plannings"?"Planning":
+                                 n.action_url==="previsionnel"?"Prévisionnel":
+                                 n.action_url==="technique"?"Suivi":""}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {/* Date */}
-                <div style={{fontSize:10,color:T.dim,flexShrink:0,textAlign:"right",
-                  fontFamily:"'JetBrains Mono',monospace"}}>
-                  {dateStr}<br/>{timeStr}
-                </div>
+                {/* Bouton supprimer */}
+                <button onClick={()=>supprimerNotif(n.id)} title="Supprimer" style={{
+                  flexShrink:0,padding:"4px 6px",borderRadius:4,border:"none",
+                  background:"transparent",color:T.dim,cursor:"pointer",fontSize:14,
+                  opacity:0.5,transition:"opacity .15s"}}
+                  onMouseOver={e=>e.currentTarget.style.opacity="1"}
+                  onMouseOut={e=>e.currentTarget.style.opacity="0.5"}>
+                  ✕
+                </button>
               </div>
             );
           })}
