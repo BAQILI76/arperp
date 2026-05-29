@@ -507,7 +507,10 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
 
   const marquerLu = (id) => {
     setNotifications(prev=>prev.map(n=>n.id===id?{...n,lu:true}:n));
-    sb.from("notifications").update({lu:true}).eq("id",id).then(()=>{}).catch(()=>{});
+    // Mettre à jour en DB seulement si c'est un vrai id Supabase (pas un id local temporaire)
+    if(id && !String(id).startsWith("local_")) {
+      sb.from("notifications").update({lu:true}).eq("id",id).then(()=>{}).catch(()=>{});
+    }
   };
 
   const marquerToutLu = () => {
@@ -521,7 +524,9 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
 
   const supprimerNotif = (id) => {
     setNotifications(prev=>prev.filter(n=>n.id!==id));
-    if(id) sb.from("notifications").delete().eq("id",id).then(()=>{}).catch(()=>{});
+    if(id && !String(id).startsWith("local_")) {
+      sb.from("notifications").delete().eq("id",id).then(()=>{}).catch(()=>{});
+    }
   };
 
   const supprimerToutesLues = () => {
@@ -4553,9 +4558,18 @@ export default function App() {
 
   // Créer une notification dans Supabase + state local
   const sendNotif = (notif) => {
-    const newNotif = {...notif, lu:false, created_at:new Date().toISOString()};
+    const localId = "local_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+    const newNotif = {...notif, id:localId, lu:false, created_at:new Date().toISOString()};
     setNotifications(prev=>[newNotif,...prev]);
-    sb.from("notifications").insert(newNotif).then(()=>{}).catch(()=>{});
+    // Insérer en DB et récupérer le vrai id pour remplacer le local
+    sb.from("notifications").insert({...notif, lu:false, created_at:newNotif.created_at})
+      .select().then(({data})=>{
+        if(data?.[0]?.id) {
+          setNotifications(prev=>prev.map(n=>
+            n.id===localId ? {...n, id:data[0].id} : n
+          ));
+        }
+      }).catch(()=>{});
   };
 
   // setContrats : accepte une valeur ou une fonction updater (comme useState)
