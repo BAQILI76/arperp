@@ -2521,7 +2521,7 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
   );
 }
 
-function PageTechnique({contrats, setContrats, roleId, roles}) {
+function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert}) {
   const [selected,   setSelected]   = useState(null);
   const [planning,   setPlanning]   = useState(null); // contrat en cours de planification
   const [filtreType, setFiltreType] = useState("Tous");
@@ -2559,10 +2559,8 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
       const newC = {...c, modalites, planning_global_statut,
         date_debut_cdp,
         echeances: mkEcheances({...c, modalites, date_debut_cdp, date_debut: date_debut_cdp||c.date_debut})};
-      // Sauvegarde Supabase — modalites uniquement (colonne existante)
-      sb.from("contrats").update({
-        modalites: modalites,
-      }).eq("id", contratId).then(()=>{}).catch(e=>console.warn("planning save:",e.message));
+      // Sauvegarde Supabase via sbUpsert (structure {id, data})
+      sbUpsert("contrats", newC);
       sb.from("audit_log").insert({
         user_name: roleId,
         action: "PLANNING_SOUMIS",
@@ -2841,7 +2839,7 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
 /* ═══════════════════════════════════════════════════════════
    PAGE ADMIN — ACCÈS + AFFECTATION PROJETS
 ═══════════════════════════════════════════════════════════ */
-function PageAdmin({roles, setRoles, contrats, setContrats}) {
+function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert}) {
   const [editPin, setEditPin] = useState({});
   const [editNom, setEditNom] = useState({});
   const [onglet, setOnglet]   = useState("acces"); // "acces" | "affectation" | "journal"
@@ -3081,8 +3079,9 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                                 if(newMod[k]?.planning_statut==="soumis")
                                   newMod[k]={...newMod[k],planning_statut:"revision"};
                               });
-                              sb.from("contrats").update({modalites:newMod}).eq("id",ct.id).then(()=>{}).catch(()=>{});
-                              return {...ct,modalites:newMod,planning_global_statut:"revision"};
+                              const revCt = {...ct,modalites:newMod,planning_global_statut:"revision"};
+                              sbUpsert("contrats", revCt);
+                              return revCt;
                             }));
                           }} style={{padding:"8px 16px",borderRadius:6,border:`1px solid ${T.red}40`,
                             background:"transparent",color:T.red,fontSize:12,cursor:"pointer",
@@ -3098,7 +3097,6 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                               // Stocker planning_global_statut + date_debut_cdp dans modalites
                               newMod["_planning_global_statut"] = "valide";
                               newMod["_date_debut_cdp"] = ct.date_debut_cdp || ct.modalites?.["_date_debut_cdp"] || "";
-                              sb.from("contrats").update({modalites:newMod}).eq("id",ct.id).then(()=>{}).catch(()=>{});
                               sb.from("audit_log").insert({user_name:"ADMIN",
                                 action:"PLANNING_VALIDE",table_name:"contrats",
                                 record_id:String(ct.id),
@@ -3107,7 +3105,9 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                               const updatedCt = {...ct, modalites:newMod,
                                 planning_global_statut:"valide",
                                 date_debut_cdp: ct.date_debut_cdp || newMod["_date_debut_cdp"]};
-                              return {...updatedCt, echeances:calcDatesCDP(updatedCt)};
+                              const finalCt = {...updatedCt, echeances:calcDatesCDP(updatedCt)};
+                              sbUpsert("contrats", finalCt);
+                              return finalCt;
                             }));
                           }} style={{padding:"8px 18px",borderRadius:6,border:"none",
                             background:T.green,color:"#08080A",fontSize:12,fontWeight:600,
@@ -4361,7 +4361,7 @@ export default function App() {
           {tab==="facturation"&&
             <PageFacturation contrats={contrats} setContrats={setContrats} clients={clients}/>}
           {tab==="technique"&&
-            <PageTechnique contrats={contrats} setContrats={setContrats} roleId={role} roles={roles}/>}
+            <PageTechnique contrats={contrats} setContrats={setContrats} roleId={role} roles={roles} sbUpsert={sbUpsert}/>}
           {tab==="previsionnel"&&
             <PagePrevisionnel contrats={contrats} charges={charges}/>}
           {tab==="clients"&&
@@ -4371,7 +4371,7 @@ export default function App() {
           {tab==="rentabilite"&&
             <PageRentabilite contrats={contrats} charges={charges} roles={roles}/>}
           {tab==="admin"&&
-            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}/>}
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats} sbUpsert={sbUpsert}/>}
         </div>
       </div>
       {/* ── Modal confirmation déconnexion ── */}
