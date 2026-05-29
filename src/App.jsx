@@ -133,88 +133,74 @@ const semToLabel = (totalSem) => {
 };
 
 const mkEcheances = (contrat) => {
-  if(!contrat.date_debut||!contrat.honoraires) return [];
-  let cursor = new Date(contrat.date_debut);
+  if(!contrat.honoraires) return [];
+  
+  const pgs = contrat.planning_global_statut; // null | "soumis" | "valide" | "revision"
+  const planning_valide = pgs === "valide";
+  
+  // Point de départ : date CDP si planning validé, sinon date contrat
+  const dateStart = (planning_valide && contrat.date_debut_cdp)
+    ? contrat.date_debut_cdp
+    : (contrat.date_debut || null);
+  
+  let cursor = dateStart ? new Date(dateStart) : null;
+  
   return PHASES_DEF.map(ph => {
-    const ov     = contrat.modalites?.[ph.key]||{};
-    const actif  = ov.actif!==false;
-    const pctV   = ov.pct  !==undefined ? ov.pct  : ph.pct;
-    const duree  = ov.duree!==undefined ? ov.duree : ph.duree;
-    const retard = ov.retard||0;
-    const montant= Math.round((contrat.honoraires*pctV)/100);
-    const debut  = new Date(cursor);
-    const echeance = addW(debut.toISOString().split("T")[0], duree);
-    const paiement = addD(echeance, contrat.delai_paiement||14);
-    cursor = new Date(echeance);
-    cursor.setDate(cursor.getDate()+retard*7);
+    const ov    = contrat.modalites?.[ph.key]||{};
+    const actif = ov.actif!==false;
+    const pctV  = ov.pct!==undefined ? ov.pct : ph.pct;
+    const montant = Math.round((contrat.honoraires*pctV)/100);
+    
+    // Durée selon statut planning :
+    // - planning validé → délai CDP (ou 0 si jalon désactivé)
+    // - sinon → 0 (en attente CDP)
+    const phase_active = ov.phase_active_cdp !== false;
+    const delai_cdp    = ov.delai_cdp || 0;
+    const retard_cdp   = (ov.retard_statut==="valide" ? ov.retard_cdp||0 : 0);
+    const duree_effective = planning_valide && phase_active ? delai_cdp + retard_cdp : 0;
+    
+    // Calcul dates
+    const debut = cursor ? new Date(cursor) : null;
+    const echeance = debut ? addW(debut.toISOString().split("T")[0], duree_effective) : null;
+    const paiement = echeance ? addD(echeance, contrat.delai_paiement||14) : null;
+    if(cursor && echeance) cursor = new Date(echeance);
+    
     return {
       key:ph.key, label:ph.label, couleur:ph.couleur,
-      pct:pctV, duree, retard, montant, actif,
-      date_debut:   debut.toISOString().split("T")[0],
-      date_echeance: echeance,
-      date_paiement: paiement,
-      livree:        ov.livree||false,
-      date_livraison:ov.date_livraison||null,
-      facture_emise: ov.facture_emise||false,
-      paiement_recu: ov.paiement_recu||false,
-      mensuel:       ph.mensuel||false,
-      avancement:    ov.avancement||0,
-      notes_tech:    ov.notes_tech||"",
-      // Facturation groupée
-      facturable:    ov.facturable!==undefined ? ov.facturable : (ph.facturable!==false),
-      groupe_fact:   ov.groupe_fact||null,
-      libelle_fact:  ov.libelle_fact||"",
+      pct:pctV, montant, actif,
+      // Durées
+      duree:           duree_effective,
+      delai_cdp,
+      retard_cdp:      ov.retard_cdp||0,
+      retard:          ov.retard||0,
+      // Dates (null si pas de planning validé)
+      date_debut:      debut    ? debut.toISOString().split("T")[0] : null,
+      date_echeance:   echeance || null,
+      date_paiement:   paiement || null,
+      // États
+      livree:          ov.livree||false,
+      date_livraison:  ov.date_livraison||null,
+      facture_emise:   ov.facture_emise||false,
+      paiement_recu:   ov.paiement_recu||false,
+      mensuel:         ph.mensuel||false,
+      avancement:      ov.avancement||0,
+      notes_tech:      ov.notes_tech||"",
+      facturable:      ov.facturable!==undefined ? ov.facturable : (ph.facturable!==false),
+      groupe_fact:     ov.groupe_fact||null,
+      libelle_fact:    ov.libelle_fact||"",
       retard_manuel:   ov.retard_manuel||false,
-      // ── Workflow planning CDP ──
-      delai_cdp:       ov.delai_cdp||0,          // semaines saisies par CDP
-      date_debut_cdp:  ov.date_debut_cdp||null,   // date démarrage saisie par CDP
-      retard_cdp:      ov.retard_cdp||0,          // retard saisi par CDP
-      planning_statut: ov.planning_statut||null,  // null | "soumis" | "valide" | "revision"
-      retard_statut:   ov.retard_statut||null,    // null | "soumis" | "valide"
-      phase_active_cdp:ov.phase_active_cdp!==false, // jalon actif dans ce projet
+      // Workflow CDP
+      planning_statut:  ov.planning_statut||null,
+      retard_statut:    ov.retard_statut||null,
+      phase_active_cdp: phase_active,
     };
   }).filter(e=>e.actif);
 };
 
 /* ─── Calcul dates depuis planning CDP validé ─────── */
-const calcDatesCDP = (contrat) => {
-  // Priorité : date saisie par CDP, sinon date contrat
-  const dateStart = contrat.date_debut_cdp
-    || contrat.modalites?.["_date_debut_cdp"]
-    || contrat.date_debut;
-  if(!dateStart) return contrat.echeances||[];
-  
-  let cursor = dateStart;
-  
-  // Recalculer depuis les modalites directement (source de vérité)
-  return PHASES_DEF.map(ph => {
-    const ov = contrat.modalites?.[ph.key] || {};
-    const actif = ov.phase_active_cdp !== false && ov.actif !== false;
-    if(!actif) return null;
-    
-    const delai  = ov.delai_cdp  || ov.duree  || 0;
-    const retard = ov.retard_cdp || ov.retard || 0;
-    const pctV   = ov.pct !== undefined ? ov.pct : ph.pct;
-    const montant = Math.round(((contrat.honoraires||0) * pctV) / 100);
-    
-    const date_echeance = addW(cursor, delai + retard);
-    const date_paiement = addD(date_echeance, contrat.delai_paiement||14);
-    
-    const result = {
-      key: ph.key, label: ph.label, couleur: ph.couleur,
-      pct: pctV, delai_cdp: delai, retard_cdp: retard, montant,
-      date_debut: cursor, date_echeance, date_paiement,
-      livree:        ov.livree||false,
-      facture_emise: ov.facture_emise||false,
-      paiement_recu: ov.paiement_recu||false,
-      avancement:    ov.avancement||0,
-      planning_statut: ov.planning_statut||null,
-      phase_active_cdp: actif,
-    };
-    cursor = date_echeance;
-    return result;
-  }).filter(Boolean);
-};
+// calcDatesCDP → remplacé par mkEcheances (source de vérité unique)
+// mkEcheances utilise delai_cdp si planning_global_statut === "valide"
+const calcDatesCDP = (contrat) => mkEcheances(contrat);
 
 /* ═══════════════════════════════════════════════════════════
    DONNÉES DÉMO
@@ -3691,14 +3677,17 @@ function PageRentabilite({contrats, charges, roles}) {
    PAGE PRÉVISIONNEL
 ═══════════════════════════════════════════════════════════ */
 function PagePrevisionnel({contrats, charges}) {
-  // Pour les contrats avec planning CDP validé → utiliser les dates recalculées
-  const allEch = contrats.flatMap(c=>{
-    const echs = c.planning_global_statut==="valide"
-      ? calcDatesCDP(c)
-      : (c.echeances||[]);
-    return echs.map(e=>({...e,cNom:c.nom,cRef:c.ref_interne||c.ref,
-      planning_valide: c.planning_global_statut==="valide"}));
-  }).sort((a,b)=>(a.date_paiement||"").localeCompare(b.date_paiement||""));
+  // echeances déjà calculées par mkEcheances avec la bonne source (CDP si validé, 0 sinon)
+  const allEch = contrats.flatMap(c=>
+    (c.echeances||[]).map(e=>({...e,
+      cNom: c.nom,
+      cRef: c.ref_interne||c.ref,
+      cId:  c.id,
+      planning_valide:  c.planning_global_statut==="valide",
+      planning_soumis:  c.planning_global_statut==="soumis",
+      planning_statut_global: c.planning_global_statut||null,
+    }))
+  ).sort((a,b)=>(a.date_paiement||"").localeCompare(b.date_paiement||""));
   
   // Badge : combien de contrats ont un planning validé
   const nPlanifies = contrats.filter(c=>c.planning_global_statut==="valide").length;
@@ -3820,16 +3809,28 @@ function PagePrevisionnel({contrats, charges}) {
                     <div style={{fontSize:12,color:T.text}}>{e.cNom?.split(" ").slice(0,3).join(" ")}</div>
                   </td>
                   <td style={{padding:"9px 13px"}}><Tag c={e.couleur}>{e.key}</Tag></td>
-                  <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:T.sub}}>{e.date_echeance}</td>
-                  <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:T.gold}}>{e.date_paiement}</td>
+                  <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:10,
+                    color:e.date_echeance?T.sub:T.dim}}>
+                    {e.date_echeance||<span style={{fontSize:9,color:T.dim,fontStyle:"italic"}}>En attente CDP</span>}
+                  </td>
+                  <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:10,
+                    color:e.date_paiement?T.gold:T.dim}}>
+                    {e.date_paiement||"—"}
+                  </td>
                   <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:T.gold,whiteSpace:"nowrap"}}>{fmt(e.montant)}</td>
                   <td style={{padding:"9px 13px"}}>
-                    {e.planning_valide&&!e.paiement_recu&&!e.facture_emise&&(
-                      <Tag c={T.teal} sm>📅 CDP</Tag>
+                    {e.planning_valide ? (
+                      <Tag c={T.teal} sm>✓ CDP</Tag>
+                    ) : e.planning_soumis ? (
+                      <Tag c={T.orange} sm>⏳ Soumis</Tag>
+                    ) : (
+                      <Tag c={T.dim} sm>En attente</Tag>
                     )}
-                    <Tag c={e.paiement_recu?T.green:e.facture_emise?T.orange:e.retard>0?T.red:T.blue} sm>
-                      {e.paiement_recu?"Payé":e.facture_emise?"Facturé":e.retard>0?"Retard":"Planifié"}
-                    </Tag>
+                    {(e.paiement_recu||e.facture_emise) && (
+                      <Tag c={e.paiement_recu?T.green:T.orange} sm style={{marginLeft:4}}>
+                        {e.paiement_recu?"Payé":"Facturé"}
+                      </Tag>
+                    )}
                   </td>
                   <td style={{padding:"9px 13px",fontFamily:"'JetBrains Mono',monospace",
                     fontSize:10,color:e.retard>0?T.red:T.dim}}>
