@@ -53,40 +53,40 @@ const ROLES = {
   ADMIN: {
     id:"ADMIN", label:"Architecte / Gérant", pin:"0000",
     couleur: T.gold, icon:"⬡",
-    desc:"Accès complet · Configuration · Vision consolidée",
-    tabs:["dashboard","contrats","facturation","technique","previsionnel","rentabilite","clients","charges","admin"],
+    desc:"Accès complet · Administration · Vision consolidée",
+    tabs:["notifs","dashboard","contrats","previsionnel","facturation","charges","indicateurs","technique","plannings","equipe","journal"],
     isCdP:false,
   },
   RAF: {
     id:"RAF", label:"RAF", pin:"1234",
     couleur: T.blue, icon:"◻",
-    desc:"Contrats · Facturation · Clients · Charges · Prévisionnel",
-    tabs:["dashboard_raf","contrats","facturation","previsionnel","rentabilite","clients","charges"],
+    desc:"Finances · Contrats · Prévisionnel · Facturation",
+    tabs:["notifs","contrats","previsionnel","facturation","charges","indicateurs"],
     isCdP:false,
   },
   CDP1: {
     id:"CDP1", label:"Chef de Projet 1", pin:"1111",
     couleur:"#34D399", icon:"◈",
     desc:"Suivi technique · Projets affectés",
-    tabs:["technique"], isCdP:true, nom:"Chef de Projet 1",
+    tabs:["notifs","technique","mon_planning"], isCdP:true, nom:"Chef de Projet 1",
   },
   CDP2: {
     id:"CDP2", label:"Chef de Projet 2", pin:"2222",
     couleur:"#60A5FA", icon:"◈",
     desc:"Suivi technique · Projets affectés",
-    tabs:["technique"], isCdP:true, nom:"Chef de Projet 2",
+    tabs:["notifs","technique","mon_planning"], isCdP:true, nom:"Chef de Projet 2",
   },
   CDP3: {
     id:"CDP3", label:"Chef de Projet 3", pin:"3333",
     couleur:"#C084FC", icon:"◈",
     desc:"Suivi technique · Projets affectés",
-    tabs:["technique"], isCdP:true, nom:"Chef de Projet 3",
+    tabs:["notifs","technique","mon_planning"], isCdP:true, nom:"Chef de Projet 3",
   },
   CDP4: {
     id:"CDP4", label:"Chef de Projet 4", pin:"4444",
     couleur:"#FB923C", icon:"◈",
     desc:"Suivi technique · Projets affectés",
-    tabs:["technique"], isCdP:true, nom:"Chef de Projet 4",
+    tabs:["notifs","technique","mon_planning"], isCdP:true, nom:"Chef de Projet 4",
   },
 };
 
@@ -488,6 +488,146 @@ const MiniGantt = ({echeances}) => {
 /* ═══════════════════════════════════════════════════════════
    DASHBOARD ADMIN & RAF
 ═══════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE NOTIFICATIONS
+═══════════════════════════════════════════════════════════ */
+function PageNotifications({roleId, roles, contrats, notifications, setNotifications, setTab}) {
+  const roleNotifs = notifications.filter(n=>
+    n.destinataire===roleId || n.destinataire==="ALL"
+  ).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+
+  const nonLues = roleNotifs.filter(n=>!n.lu).length;
+
+  const marquerLu = (id) => {
+    setNotifications(prev=>prev.map(n=>n.id===id?{...n,lu:true}:n));
+    sb.from("notifications").update({lu:true}).eq("id",id).then(()=>{}).catch(()=>{});
+  };
+
+  const marquerToutLu = () => {
+    setNotifications(prev=>prev.map(n=>
+      (n.destinataire===roleId||n.destinataire==="ALL")?{...n,lu:true}:n
+    ));
+    roleNotifs.forEach(n=>{
+      sb.from("notifications").update({lu:true}).eq("id",n.id).then(()=>{}).catch(()=>{});
+    });
+  };
+
+  const iconType = (type) => {
+    const map = {
+      "PLANNING_SOUMIS":"⏳","PLANNING_VALIDE":"✓","PLANNING_REVISION":"↩",
+      "RETARD_SOUMIS":"⚠","RETARD_VALIDE":"✓","JALON_LIVRE":"📦",
+      "ECHEANCE_J14":"💰","CONTRAT_CREE":"📄","NOUVEAU_PROJET":"📋",
+    };
+    return map[type]||"•";
+  };
+
+  const colorType = (type) => {
+    if(type?.includes("VALIDE")) return T.green;
+    if(type?.includes("SOUMIS")||type?.includes("CREE")||type?.includes("NOUVEAU")) return T.orange;
+    if(type?.includes("RETARD")||type?.includes("REVISION")) return T.red;
+    if(type?.includes("ECHEANCE")||type?.includes("LIVRE")) return T.gold;
+    return T.blue;
+  };
+
+  return (
+    <div style={{maxWidth:720}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+        <div>
+          <h2 style={{fontFamily:"'Inter',sans-serif",fontSize:20,fontWeight:600,color:T.text,letterSpacing:"-.01em"}}>
+            Notifications
+          </h2>
+          <p style={{color:T.sub,fontSize:13,marginTop:3}}>
+            {nonLues>0?`${nonLues} non lue${nonLues>1?"s":""}`:"Tout est à jour ✓"}
+          </p>
+        </div>
+        {nonLues>0&&(
+          <button onClick={marquerToutLu} style={{
+            padding:"8px 16px",borderRadius:6,border:`1px solid ${T.border}`,
+            background:"transparent",color:T.sub,fontSize:12,cursor:"pointer",
+            fontFamily:"'Inter',sans-serif"}}>
+            Tout marquer comme lu
+          </button>
+        )}
+      </div>
+
+      {roleNotifs.length===0?(
+        <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,
+          padding:"48px",textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:12}}>✓</div>
+          <div style={{fontSize:14,color:T.sub}}>Aucune notification</div>
+        </div>
+      ):(
+        <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,overflow:"hidden"}}>
+          {roleNotifs.map((n,i)=>{
+            const c = colorType(n.type);
+            const d = new Date(n.created_at);
+            const dateStr = d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});
+            const timeStr = d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+            return (
+              <div key={n.id||i} onClick={()=>!n.lu&&marquerLu(n.id||i)}
+                style={{
+                  display:"flex",alignItems:"flex-start",gap:14,
+                  padding:"14px 18px",
+                  borderBottom:i<roleNotifs.length-1?`1px solid ${T.border}`:"none",
+                  background:n.lu?"transparent":`${c}06`,
+                  cursor:n.lu?"default":"pointer",
+                  transition:"background .15s",
+                }}>
+                {/* Icône */}
+                <div style={{
+                  width:36,height:36,borderRadius:8,flexShrink:0,
+                  background:`${c}15`,border:`1px solid ${c}30`,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:16,
+                }}>{iconType(n.type)}</div>
+                {/* Contenu */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
+                    <span style={{fontSize:13,fontWeight:n.lu?400:500,color:T.text,fontFamily:"'Inter',sans-serif"}}>
+                      {n.message}
+                    </span>
+                    {!n.lu&&(
+                      <span style={{width:6,height:6,borderRadius:"50%",background:c,flexShrink:0,display:"inline-block"}}/>
+                    )}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    {n.contrat_ref&&(
+                      <span style={{fontSize:10,color:T.goldDk,fontFamily:"'JetBrains Mono',monospace"}}>
+                        {n.contrat_ref}
+                      </span>
+                    )}
+                    {n.contrat_nom&&(
+                      <span style={{fontSize:11,color:T.sub}}>{n.contrat_nom}</span>
+                    )}
+                    <span style={{fontSize:10,color:T.dim}}>{dateStr} · {timeStr}</span>
+                  </div>
+                  {/* Action rapide selon type */}
+                  {n.action_url && !n.lu && (
+                    <button onClick={e=>{e.stopPropagation();marquerLu(n.id||i);setTab(n.action_url);}}
+                      style={{marginTop:8,padding:"5px 12px",borderRadius:5,
+                        border:`1px solid ${c}40`,background:`${c}10`,
+                        color:c,fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                      Voir → {n.action_url==="plannings"?"Validation planning":
+                               n.action_url==="previsionnel"?"Prévisionnel":
+                               n.action_url==="technique"?"Suivi technique":""}
+                    </button>
+                  )}
+                </div>
+                {/* Date */}
+                <div style={{fontSize:10,color:T.dim,flexShrink:0,textAlign:"right",
+                  fontFamily:"'JetBrains Mono',monospace"}}>
+                  {dateStr}<br/>{timeStr}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PageDashboard({contrats, clients, charges, role}) {
   const allEch  = contrats.flatMap(c=>(c.echeances||[]).map(e=>({...e,cNom:c.nom,cRef:c.ref})));
   const totHon  = contrats.reduce((s,c)=>s+c.honoraires,0);
@@ -2218,6 +2358,251 @@ function DetailProjet({contrat, onClose, onUpdate, cdpCouleur}) {
    CDP saisit : date démarrage + délais par jalon + jalons actifs
    Soumet pour validation Admin
 ═══════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE MON PLANNING (CDP)
+   Vue consolidée de tous les jalons du CDP par date
+═══════════════════════════════════════════════════════════ */
+function PageMonPlanning({contrats, roleId, roles, setContrats, sbUpsert, sendNotif}) {
+  const cdpCouleur = roles[roleId]?.couleur || T.teal;
+  
+  const projetsAffectes = contrats.filter(c=>c.cdpId===roleId&&c.statut==="Actif");
+  
+  // Tous les jalons de tous les projets du CDP, triés par date
+  const tousJalons = projetsAffectes.flatMap(c=>
+    (c.echeances||[]).map(e=>({...e, contrat:c}))
+  ).filter(e=>!e.livree)
+   .sort((a,b)=>(a.date_echeance||"9999").localeCompare(b.date_echeance||"9999"));
+
+  const today = new Date().toISOString().split("T")[0];
+  const enRetard = tousJalons.filter(e=>e.date_echeance&&e.date_echeance<today);
+  const aVenir   = tousJalons.filter(e=>!e.date_echeance||e.date_echeance>=today);
+
+  // Signaler un retard
+  const [retardForm, setRetardForm] = useState({contratId:"",phaseKey:"",semaines:1,note:""});
+  const [saving, setSaving] = useState(false);
+
+  const soumettrеRetard = () => {
+    if(!retardForm.contratId||!retardForm.phaseKey||!retardForm.semaines) return;
+    setSaving(true);
+    setContrats(prev=>{
+      const next = prev.map(c=>{
+        if(String(c.id)!==String(retardForm.contratId)) return c;
+        const newMod = {...c.modalites,
+          [retardForm.phaseKey]:{
+            ...(c.modalites?.[retardForm.phaseKey]||{}),
+            retard_cdp: +retardForm.semaines,
+            retard_statut: "soumis",
+          }
+        };
+        const newC = {...c, modalites:newMod, echeances:mkEcheances({...c,modalites:newMod})};
+        setTimeout(()=>{
+          sbUpsert("contrats", newC);
+          // Notif Admin
+          sendNotif({
+            destinataire:"ADMIN",
+            type:"RETARD_SOUMIS",
+            contrat_id:String(c.id),
+            contrat_ref:c.ref,
+            contrat_nom:c.nom,
+            message:`Retard signalé — ${c.ref} · ${retardForm.phaseKey} · +${retardForm.semaines} sem`,
+            action_url:"plannings",
+            priorite:"haute",
+          });
+        },100);
+        return newC;
+      });
+      return next;
+    });
+    setSaving(false);
+    setRetardForm({contratId:"",phaseKey:"",semaines:1,note:""});
+  };
+
+  const phasesContrat = retardForm.contratId
+    ? (contrats.find(c=>String(c.id)===String(retardForm.contratId))?.echeances||[])
+        .filter(e=>!e.livree&&PHASES_SUIVI.includes(e.key))
+    : [];
+
+  return (
+    <div style={{maxWidth:800}}>
+      <div style={{marginBottom:20}}>
+        <h2 style={{fontFamily:"'Inter',sans-serif",fontSize:20,fontWeight:600,color:T.text,
+          letterSpacing:"-.01em"}}>Mon Planning</h2>
+        <p style={{color:T.sub,fontSize:13,marginTop:3}}>
+          {projetsAffectes.length} projet(s) · {tousJalons.length} jalons à livrer
+        </p>
+      </div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"Projets actifs",val:projetsAffectes.length,c:cdpCouleur},
+          {label:"En retard",val:enRetard.length,c:enRetard.length>0?T.red:T.green},
+          {label:"À livrer",val:aVenir.length,c:T.gold},
+        ].map(k=>(
+          <div key={k.label} style={{background:T.card,border:`1px solid ${T.border}`,
+            borderRadius:8,padding:"12px 16px"}}>
+            <div style={{fontSize:10,color:T.dim,marginBottom:4}}>{k.label}</div>
+            <div style={{fontSize:22,fontWeight:600,color:k.c,fontFamily:"'Inter',sans-serif"}}>{k.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Jalons en retard */}
+      {enRetard.length>0&&(
+        <div style={{background:T.card,border:`1px solid ${T.red}40`,borderRadius:8,
+          marginBottom:14,overflow:"hidden"}}>
+          <div style={{padding:"10px 16px",borderBottom:`1px solid ${T.border}`,
+            display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,fontWeight:500,color:T.red}}>⚠ Jalons en retard</span>
+            <Tag c={T.red}>{enRetard.length}</Tag>
+          </div>
+          {enRetard.map((e,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+              padding:"10px 16px",borderBottom:i<enRetard.length-1?`1px solid ${T.border}`:"none"}}>
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:e.couleur}}/>
+                  <span style={{fontSize:12,color:T.text,fontWeight:500}}>{e.label}</span>
+                  <span style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>
+                    {e.contrat.ref}
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:T.sub,marginTop:2,paddingLeft:13}}>
+                  {e.contrat.nom}
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:11,color:T.red,fontFamily:"'JetBrains Mono',monospace"}}>
+                  {e.date_echeance||"—"}
+                </div>
+                <div style={{fontSize:10,color:T.dim}}>dépassé</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Jalons à venir */}
+      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,
+        marginBottom:20,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",borderBottom:`1px solid ${T.border}`,
+          fontSize:12,fontWeight:500,color:T.text}}>
+          Jalons à venir
+        </div>
+        {aVenir.length===0?(
+          <div style={{padding:24,textAlign:"center",fontSize:12,color:T.dim}}>
+            Aucun jalon planifié
+          </div>
+        ):aVenir.map((e,i)=>{
+          const daysLeft = e.date_echeance
+            ? Math.ceil((new Date(e.date_echeance)-new Date())/86400000)
+            : null;
+          const urgent = daysLeft!==null&&daysLeft<=14;
+          return (
+            <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+              padding:"10px 16px",
+              borderBottom:i<aVenir.length-1?`1px solid ${T.border}`:"none",
+              background:urgent?`${T.orange}06`:"transparent"}}>
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:e.couleur}}/>
+                  <span style={{fontSize:12,color:T.text,fontWeight:500}}>{e.label}</span>
+                  <span style={{fontSize:10,color:T.dim,fontFamily:"'JetBrains Mono',monospace"}}>
+                    {e.contrat.ref}
+                  </span>
+                  {urgent&&<Tag c={T.orange} sm>J-{daysLeft}</Tag>}
+                </div>
+                <div style={{fontSize:11,color:T.sub,marginTop:2,paddingLeft:13}}>
+                  {e.contrat.nom}
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:11,
+                  color:e.date_echeance?cdpCouleur:T.dim,
+                  fontFamily:"'JetBrains Mono',monospace"}}>
+                  {e.date_echeance||<em style={{fontSize:10,color:T.dim}}>En attente CDP</em>}
+                </div>
+                {daysLeft!==null&&(
+                  <div style={{fontSize:10,color:urgent?T.orange:T.dim}}>
+                    dans {daysLeft} jour{daysLeft>1?"s":""}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Signaler un retard */}
+      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",borderBottom:`1px solid ${T.border}`,
+          fontSize:12,fontWeight:500,color:T.text}}>
+          ⚠ Signaler un retard
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 120px 1fr",gap:12,marginBottom:10}}>
+            <div>
+              <div style={{fontSize:10,color:T.dim,marginBottom:5}}>Projet</div>
+              <select value={retardForm.contratId}
+                onChange={e=>setRetardForm(p=>({...p,contratId:e.target.value,phaseKey:""}))}
+                style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,
+                  borderRadius:5,padding:"7px 8px",color:T.text,fontSize:12}}>
+                <option value="">Choisir...</option>
+                {projetsAffectes.map(c=>(
+                  <option key={c.id} value={c.id}>{c.ref} · {c.nom?.slice(0,20)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:T.dim,marginBottom:5}}>Jalon</div>
+              <select value={retardForm.phaseKey}
+                onChange={e=>setRetardForm(p=>({...p,phaseKey:e.target.value}))}
+                disabled={!retardForm.contratId}
+                style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,
+                  borderRadius:5,padding:"7px 8px",color:T.text,fontSize:12,
+                  opacity:retardForm.contratId?1:0.5}}>
+                <option value="">Choisir...</option>
+                {phasesContrat.map(e=>(
+                  <option key={e.key} value={e.key}>{e.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:T.dim,marginBottom:5}}>Semaines</div>
+              <input type="number" min="1" max="52" value={retardForm.semaines}
+                onChange={e=>setRetardForm(p=>({...p,semaines:+e.target.value}))}
+                style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,
+                  borderRadius:5,padding:"7px 8px",color:T.text,fontSize:12,textAlign:"center"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:T.dim,marginBottom:5}}>Note (optionnel)</div>
+              <input type="text" value={retardForm.note}
+                onChange={e=>setRetardForm(p=>({...p,note:e.target.value}))}
+                placeholder="Raison du retard..."
+                style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,
+                  borderRadius:5,padding:"7px 8px",color:T.text,fontSize:12}}/>
+            </div>
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={soumettrеRetard}
+              disabled={!retardForm.contratId||!retardForm.phaseKey||saving}
+              style={{padding:"9px 22px",borderRadius:6,border:"none",
+                background:retardForm.contratId&&retardForm.phaseKey?cdpCouleur:T.border,
+                color:retardForm.contratId&&retardForm.phaseKey?"#08080A":T.dim,
+                fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              ⬆ Soumettre pour validation
+            </button>
+          </div>
+        </div>
+        <div style={{padding:"6px 16px 10px",fontSize:10,color:T.dim,fontStyle:"italic"}}>
+          Retard soumis → notification au Gérant · validé → impact automatique sur planning RAF
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
   const echs = (contrat.echeances||[]).filter(e=>PHASES_SUIVI.includes(e.key));
   
@@ -2560,6 +2945,15 @@ function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert}) {
             context: `Planning soumis — démarrage ${date_debut_cdp}`,
             new_value: {date_debut_cdp, planning_global_statut},
           }).then(()=>{}).catch(()=>{});
+          // Notifier Admin
+          sb.from("notifications").insert({
+            destinataire:"ADMIN",type:"PLANNING_SOUMIS",
+            contrat_id:String(contratId),
+            contrat_ref:updated?.ref||"",contrat_nom:updated?.nom||"",
+            message:`Planning soumis par ${roleId} — ${updated?.ref||""} · démarrage ${date_debut_cdp}`,
+            action_url:"plannings",priorite:"haute",lu:false,
+            created_at:new Date().toISOString()
+          }).then(()=>{}).catch(()=>{});
         }, 100);
       }
       return next;
@@ -2832,10 +3226,10 @@ function PageTechnique({contrats, setContrats, roleId, roles, sbUpsert}) {
 /* ═══════════════════════════════════════════════════════════
    PAGE ADMIN — ACCÈS + AFFECTATION PROJETS
 ═══════════════════════════════════════════════════════════ */
-function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert}) {
+function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert, sendNotif, defaultOnglet}) {
   const [editPin, setEditPin] = useState({});
   const [editNom, setEditNom] = useState({});
-  const [onglet, setOnglet]   = useState("acces"); // "acces" | "affectation" | "journal"
+  const [onglet, setOnglet]   = useState(defaultOnglet||"acces"); // "acces" | "affectation" | "journal"
   const [journal, setJournal] = useState([]);
   const [loadingJournal, setLoadingJournal] = useState(false);
 
@@ -3101,6 +3495,18 @@ function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert}) {
                                   record_id:String(finalCt.id),
                                   context:`Planning validé — ${finalCt.ref}`,
                                   new_value:{planning_global_statut:"valide"}}).then(()=>{}).catch(()=>{});
+                                if(sendNotif) {
+                                  if(finalCt.cdpId) sendNotif({destinataire:finalCt.cdpId,
+                                    type:"PLANNING_VALIDE",contrat_id:String(finalCt.id),
+                                    contrat_ref:finalCt.ref,contrat_nom:finalCt.nom,
+                                    message:`Planning validé par le Gérant — ${finalCt.ref}`,
+                                    action_url:"technique"});
+                                  sendNotif({destinataire:"RAF",type:"PLANNING_VALIDE",
+                                    contrat_id:String(finalCt.id),contrat_ref:finalCt.ref,
+                                    contrat_nom:finalCt.nom,
+                                    message:`Planning CDP validé — ${finalCt.ref} · dates disponibles`,
+                                    action_url:"previsionnel"});
+                                }
                               }, 100);
                               return next;
                             });
@@ -4008,16 +4414,23 @@ function PageCharges({charges, setCharges}) {
    SIDEBAR PAR RÔLE
 ═══════════════════════════════════════════════════════════ */
 const TABS_CONFIG = {
-  dashboard:    {label:"Dashboard",       icon:"◈"},
-  dashboard_raf:{label:"Dashboard",       icon:"◈"},
-  contrats:     {label:"Contrats & BC",   icon:"⬜"},
-  facturation:  {label:"Facturation",     icon:"◻"},
-  technique:    {label:"Suivi Technique", icon:"⬡"},
-  previsionnel: {label:"Prévisionnel",    icon:"◇"},
-  clients:      {label:"Clients",         icon:"○"},
-  charges:      {label:"Charges",         icon:"△"},
-  rentabilite:  {label:"Rentabilité",      icon:"◉"},
-  admin:        {label:"Administration",  icon:"⚙"},
+  notifs:       { label:"Notifications",    icon:"🔔" },
+  dashboard:    { label:"Dashboard",        icon:"◈" },
+  contrats:     { label:"Contrats & BC",    icon:"◻" },
+  previsionnel: { label:"Prévisionnel",     icon:"◇" },
+  facturation:  { label:"Factures",         icon:"◉" },
+  charges:      { label:"Charges",          icon:"△" },
+  indicateurs:  { label:"Indicateurs",      icon:"◎" },
+  technique:    { label:"Suivi Technique",  icon:"○" },
+  mon_planning: { label:"Mon Planning",     icon:"◈" },
+  plannings:    { label:"Plannings CDP",    icon:"◇" },
+  equipe:       { label:"Équipe & Accès",   icon:"⬡" },
+  journal:      { label:"Journal",          icon:"◉" },
+  // Legacy
+  dashboard_raf:{ label:"Dashboard",        icon:"◈" },
+  rentabilite:  { label:"Rentabilité",      icon:"◎" },
+  clients:      { label:"Clients",          icon:"○" },
+  admin:        { label:"Administration",   icon:"⬡" },
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -4033,6 +4446,7 @@ export default function App() {
   const [roles,    _setRoles]    = useState(ROLES);
   const [loading,  setLoading]   = useState(true);
   const [dbError,  setDbError]   = useState(null);
+  const [notifications, setNotifications] = useState([]);
 
   /* ══════════════════════════════════════════════════════════
      WRAPPERS ÉCRITURE : setState + upsert Supabase simultanés
@@ -4061,6 +4475,13 @@ export default function App() {
       .delete()
       .eq("id", String(id))
       .then(({ error }) => { if (error) console.error(`${table} delete:`, error); });
+  };
+
+  // Créer une notification dans Supabase + state local
+  const sendNotif = (notif) => {
+    const newNotif = {...notif, lu:false, created_at:new Date().toISOString()};
+    setNotifications(prev=>[newNotif,...prev]);
+    sb.from("notifications").insert(newNotif).then(()=>{}).catch(()=>{});
   };
 
   // setContrats : accepte une valeur ou une fonction updater (comme useState)
@@ -4166,6 +4587,11 @@ export default function App() {
         }) : []);
         _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : []);
         _setCharges( !eCh && ch?.length ? ch.map(r => r.data ?? r) : []);
+        
+        // Charger les notifications (30 dernières)
+        const {data:notifs} = await sb.from("notifications")
+          .select("*").order("created_at",{ascending:false}).limit(30);
+        if(notifs?.length) setNotifications(notifs);
 
         if (!eRo && ro?.length) {
           const rolesObj = { ...ROLES };
@@ -4212,7 +4638,7 @@ export default function App() {
       }).catch(e => console.warn("Supabase Auth:", e.message));
     }
     setRole(roleId);
-    setTab(roles[roleId].tabs[0]);
+    setTab("notifs");
   };
 
   const handleLogout = async () => {
@@ -4318,24 +4744,69 @@ export default function App() {
 
           {/* Navigation */}
           <nav style={{flex:1,padding:"0 8px",overflowY:"auto"}}>
-            {allowedTabs.map(t=>{
-              const cfg = TABS_CONFIG[t];
-              if(!cfg) return null;
-              const active = tab===t;
-              return (
-                <button key={t} onClick={()=>setTab(t)} style={{
-                  width:"100%",padding:"10px 12px",borderRadius:6,border:"none",
-                  background:active?`${currentRole.couleur}14`:"transparent",
-                  color:active?currentRole.couleur:T.sub,
-                  display:"flex",alignItems:"center",gap:9,cursor:"pointer",
-                  fontSize:13,fontFamily:"'Inter',sans-serif",fontWeight:active?500:400,
-                  transition:"all .15s",marginBottom:2,textAlign:"left",
-                  borderLeft:active?`2px solid ${currentRole.couleur}`:"2px solid transparent"
-                }}>
-                  <span style={{fontSize:12}}>{cfg.icon}</span>{cfg.label}
-                </button>
-              );
-            })}
+            {(()=>{
+              const isCdP = currentRole.isCdP;
+              const isAdmin = role==="ADMIN";
+              const isRAF = role==="RAF";
+              
+              // Sections selon rôle
+              const sections = isAdmin ? [
+                {label:null, tabs:["notifs","dashboard"]},
+                {label:"RAF — Finances", tabs:["contrats","previsionnel","facturation","charges","indicateurs"]},
+                {label:"CDP — Technique", tabs:["technique","plannings"]},
+                {label:"Administration", tabs:["equipe","journal"]},
+              ] : isRAF ? [
+                {label:null, tabs:["notifs"]},
+                {label:"Finances", tabs:["contrats","previsionnel","facturation","charges","indicateurs"]},
+              ] : [
+                {label:null, tabs:["notifs"]},
+                {label:"Mes projets", tabs:["technique","mon_planning"]},
+              ];
+
+              const notifsNonLues = notifications.filter(n=>
+                (n.destinataire===role||n.destinataire==="ALL")&&!n.lu
+              ).length;
+
+              return sections.map((sec,si)=>(
+                <div key={si}>
+                  {sec.label&&(
+                    <div style={{fontSize:8,color:T.dim,fontFamily:"'JetBrains Mono',monospace",
+                      letterSpacing:".15em",textTransform:"uppercase",
+                      padding:"8px 12px 4px",marginTop:si>0?6:0}}>
+                      {sec.label}
+                    </div>
+                  )}
+                  {sec.tabs.filter(t=>allowedTabs.includes(t)).map(t=>{
+                    const cfg = TABS_CONFIG[t];
+                    if(!cfg) return null;
+                    const active = tab===t;
+                    const isNotif = t==="notifs";
+                    return (
+                      <button key={t} onClick={()=>setTab(t)} style={{
+                        width:"100%",padding:"9px 12px",borderRadius:6,border:"none",
+                        background:active?`${currentRole.couleur}14`:"transparent",
+                        color:active?currentRole.couleur:T.sub,
+                        display:"flex",alignItems:"center",justifyContent:"space-between",
+                        cursor:"pointer",fontSize:13,fontFamily:"'Inter',sans-serif",
+                        fontWeight:active?500:400,transition:"all .15s",marginBottom:1,
+                        borderLeft:active?`2px solid ${currentRole.couleur}`:"2px solid transparent"
+                      }}>
+                        <span style={{display:"flex",alignItems:"center",gap:9}}>
+                          <span style={{fontSize:12}}>{cfg.icon}</span>{cfg.label}
+                        </span>
+                        {isNotif&&notifsNonLues>0&&(
+                          <span style={{
+                            background:T.red,color:"#FFF",fontSize:9,fontWeight:600,
+                            borderRadius:99,padding:"1px 6px",minWidth:16,textAlign:"center",
+                            fontFamily:"'JetBrains Mono',monospace"
+                          }}>{notifsNonLues}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ));
+            })()}
           </nav>
 
           {/* Barème */}
@@ -4368,6 +4839,9 @@ export default function App() {
 
         {/* CONTENU */}
         <div style={{flex:1,overflow:"auto",padding:28}}>
+          {tab==="notifs"&&
+            <PageNotifications roleId={role} roles={roles} contrats={contrats}
+              notifications={notifications} setNotifications={setNotifications} setTab={setTab}/>}
           {(tab==="dashboard"||tab==="dashboard_raf")&&
             <PageDashboard contrats={contrats} clients={clients} charges={charges} role={role}/>}
           {tab==="contrats"&&
@@ -4375,17 +4849,33 @@ export default function App() {
           {tab==="facturation"&&
             <PageFacturation contrats={contrats} setContrats={setContrats} clients={clients}/>}
           {tab==="technique"&&
-            <PageTechnique contrats={contrats} setContrats={setContrats} roleId={role} roles={roles} sbUpsert={sbUpsert}/>}
+            <PageTechnique contrats={contrats} setContrats={setContrats} roleId={role} roles={roles}
+              sbUpsert={sbUpsert} sendNotif={sendNotif}/>}
+          {tab==="mon_planning"&&
+            <PageMonPlanning contrats={contrats} roleId={role} roles={roles}
+              setContrats={setContrats} sbUpsert={sbUpsert} sendNotif={sendNotif}/>}
           {tab==="previsionnel"&&
             <PagePrevisionnel contrats={contrats} charges={charges}/>}
-          {tab==="clients"&&
-            <PageClients clients={clients} setClients={setClients} contrats={contrats}/>}
           {tab==="charges"&&
             <PageCharges charges={charges} setCharges={setCharges}/>}
+          {tab==="indicateurs"&&
+            <PageRentabilite contrats={contrats} charges={charges} roles={roles}/>}
+          {tab==="plannings"&&
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="planning"/>}
+          {tab==="equipe"&&
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="acces"/>}
+          {tab==="journal"&&
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
+              sbUpsert={sbUpsert} sendNotif={sendNotif} defaultOnglet="journal"/>}
+          {tab==="clients"&&
+            <PageClients clients={clients} setClients={setClients} contrats={contrats}/>}
           {tab==="rentabilite"&&
             <PageRentabilite contrats={contrats} charges={charges} roles={roles}/>}
           {tab==="admin"&&
-            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats} sbUpsert={sbUpsert}/>}
+            <PageAdmin roles={roles} setRoles={setRoles} contrats={contrats} setContrats={setContrats}
+              sbUpsert={sbUpsert} sendNotif={sendNotif}/>}
         </div>
       </div>
       {/* ── Modal confirmation déconnexion ── */}
