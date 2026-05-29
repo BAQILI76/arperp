@@ -2526,28 +2526,25 @@ function PageTechnique({contrats, setContrats, roleId, roles}) {
   };
 
   // Sauvegarder le planning CDP (date démarrage + délais par jalon)
-  const savePlanning = async (contratId, updates) => {
+  const savePlanning = (contratId, updates) => {
     const {date_debut_cdp, modalites, planning_global_statut} = updates;
     setContrats(prev=>prev.map(c=>{
       if(c.id!==contratId) return c;
       const newC = {...c, modalites, planning_global_statut,
         date_debut_cdp,
         echeances: mkEcheances({...c, modalites, date_debut: date_debut_cdp||c.date_debut})};
-      // Upsert Supabase
-      sb.from("contrats").upsert({
-        id: contratId,
-        modalites: JSON.stringify(modalites),
-        planning_global_statut,
-        date_debut_cdp,
-      }).catch(e=>console.warn("planning save:",e.message));
+      // Sauvegarde Supabase — modalites uniquement (colonne existante)
+      sb.from("contrats").update({
+        modalites: modalites,
+      }).eq("id", contratId).then(()=>{}).catch(e=>console.warn("planning save:",e.message));
       sb.from("audit_log").insert({
         user_name: roleId,
         action: "PLANNING_SOUMIS",
         table_name: "contrats",
         record_id: String(contratId),
-        context: `Planning soumis pour validation — ${c.ref}`,
+        context: `Planning soumis — ${c.ref} — démarrage ${date_debut_cdp}`,
         new_value: {date_debut_cdp, planning_global_statut},
-      }).catch(()=>{});
+      }).then(()=>{}).catch(()=>{});
       return newC;
     }));
   };
@@ -3058,9 +3055,7 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                                 if(newMod[k]?.planning_statut==="soumis")
                                   newMod[k]={...newMod[k],planning_statut:"revision"};
                               });
-                              sb.from("contrats").upsert({id:ct.id,
-                                planning_global_statut:"revision",
-                                modalites:JSON.stringify(newMod)}).catch(()=>{});
+                              sb.from("contrats").update({modalites:newMod}).eq("id",ct.id).then(()=>{}).catch(()=>{});
                               return {...ct,modalites:newMod,planning_global_statut:"revision"};
                             }));
                           }} style={{padding:"8px 16px",borderRadius:6,border:`1px solid ${T.red}40`,
@@ -3074,14 +3069,12 @@ function PageAdmin({roles, setRoles, contrats, setContrats}) {
                                 if(newMod[k]?.planning_statut==="soumis")
                                   newMod[k]={...newMod[k],planning_statut:"valide"};
                               });
-                              sb.from("contrats").upsert({id:ct.id,
-                                planning_global_statut:"valide",
-                                modalites:JSON.stringify(newMod)}).catch(()=>{});
+                              sb.from("contrats").update({modalites:newMod}).eq("id",ct.id).then(()=>{}).catch(()=>{});
                               sb.from("audit_log").insert({user_name:"ADMIN",
                                 action:"PLANNING_VALIDE",table_name:"contrats",
                                 record_id:String(ct.id),
                                 context:`Planning validé — ${ct.ref}`,
-                                new_value:{planning_global_statut:"valide"}}).catch(()=>{});
+                                new_value:{planning_global_statut:"valide"}}).then(()=>{}).catch(()=>{});
                               return {...ct,modalites:newMod,planning_global_statut:"valide",
                                 echeances:calcDatesCDP({...ct,modalites:newMod})};
                             }));
