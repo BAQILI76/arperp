@@ -513,6 +513,14 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
     }
   };
 
+  const marquerNonLu = (id) => {
+    const sid = String(id);
+    setNotifications(prev=>prev.map(n=>String(n.id)===sid?{...n,lu:false}:n));
+    if(id && !sid.startsWith("local_")) {
+      sb.from("notifications").update({lu:false}).eq("id",id).then(()=>{}).catch(()=>{});
+    }
+  };
+
   const marquerToutLu = () => {
     setNotifications(prev=>prev.map(n=>
       (n.destinataire===roleId||n.destinataire==="ALL")?{...n,lu:true}:n
@@ -661,19 +669,29 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
                     {n.lu&&<span style={{fontSize:10,color:T.dim,fontStyle:"italic"}}>lue</span>}
                   </div>
                   {/* Actions */}
-                  <div style={{display:"flex",gap:8,marginTop:6}}>
-                    {!n.lu&&(
+                  <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
+                    {/* Toggle lu / non-lu */}
+                    {n.lu ? (
+                      <button onClick={()=>marquerNonLu(n.id)} style={{
+                        padding:"4px 10px",borderRadius:4,
+                        border:`1px solid ${T.border}`,background:"transparent",
+                        color:T.dim,fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                        ↩ Marquer non lu
+                      </button>
+                    ) : (
                       <button onClick={()=>marquerLu(n.id)} style={{
-                        padding:"4px 10px",borderRadius:4,border:`1px solid ${T.border}`,
-                        background:"transparent",color:T.sub,fontSize:11,cursor:"pointer"}}>
+                        padding:"4px 10px",borderRadius:4,
+                        border:`1px solid ${T.border}`,background:"transparent",
+                        color:T.sub,fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
                         ✓ Marquer lu
                       </button>
                     )}
+                    {/* Action rapide */}
                     {n.action_url&&!n.lu&&(
                       <button onClick={()=>{marquerLu(n.id);setTab(n.action_url);}} style={{
                         padding:"4px 10px",borderRadius:4,
                         border:`1px solid ${c}40`,background:`${c}10`,
-                        color:c,fontSize:11,cursor:"pointer"}}>
+                        color:c,fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
                         Voir → {n.action_url==="plannings"?"Planning":
                                  n.action_url==="previsionnel"?"Prévisionnel":
                                  n.action_url==="technique"?"Suivi":""}
