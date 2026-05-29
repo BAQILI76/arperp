@@ -506,9 +506,9 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
     : roleNotifs;
 
   const marquerLu = (id) => {
-    setNotifications(prev=>prev.map(n=>n.id===id?{...n,lu:true}:n));
-    // Mettre à jour en DB seulement si c'est un vrai id Supabase (pas un id local temporaire)
-    if(id && !String(id).startsWith("local_")) {
+    const sid = String(id);
+    setNotifications(prev=>prev.map(n=>String(n.id)===sid?{...n,lu:true}:n));
+    if(id && !sid.startsWith("local_")) {
       sb.from("notifications").update({lu:true}).eq("id",id).then(()=>{}).catch(()=>{});
     }
   };
@@ -523,8 +523,9 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
   };
 
   const supprimerNotif = (id) => {
-    setNotifications(prev=>prev.filter(n=>n.id!==id));
-    if(id && !String(id).startsWith("local_")) {
+    const sid = String(id);
+    setNotifications(prev=>prev.filter(n=>String(n.id)!==sid));
+    if(id && !sid.startsWith("local_")) {
       sb.from("notifications").delete().eq("id",id).then(()=>{}).catch(()=>{});
     }
   };
@@ -662,14 +663,14 @@ function PageNotifications({roleId, roles, contrats, notifications, setNotificat
                   {/* Actions */}
                   <div style={{display:"flex",gap:8,marginTop:6}}>
                     {!n.lu&&(
-                      <button onClick={()=>marquerLu(n.id||i)} style={{
+                      <button onClick={()=>marquerLu(n.id)} style={{
                         padding:"4px 10px",borderRadius:4,border:`1px solid ${T.border}`,
                         background:"transparent",color:T.sub,fontSize:11,cursor:"pointer"}}>
                         ✓ Marquer lu
                       </button>
                     )}
                     {n.action_url&&!n.lu&&(
-                      <button onClick={()=>{marquerLu(n.id||i);setTab(n.action_url);}} style={{
+                      <button onClick={()=>{marquerLu(n.id);setTab(n.action_url);}} style={{
                         padding:"4px 10px",borderRadius:4,
                         border:`1px solid ${c}40`,background:`${c}10`,
                         color:c,fontSize:11,cursor:"pointer"}}>
