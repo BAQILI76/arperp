@@ -2285,9 +2285,6 @@ function PagePlanification({contrat, onClose, onSave, cdpCouleur, cdpId}) {
         planning_statut:  "soumis",
       };
     });
-    // Stocker statut et date dans modalites pour persistance Supabase
-    newModalites["_date_debut_cdp"]         = form.dateDebut;
-    newModalites["_planning_global_statut"] = "soumis";
     onSave(contrat.id, {
       date_debut_cdp:         form.dateDebut,
       modalites:              newModalites,
@@ -3105,8 +3102,6 @@ function PageAdmin({roles, setRoles, contrats, setContrats, sbUpsert}) {
                                   if(newMod[k]?.planning_statut==="soumis")
                                     newMod[k]={...newMod[k],planning_statut:"valide"};
                                 });
-                                newMod["_planning_global_statut"] = "valide";
-                                newMod["_date_debut_cdp"] = ct.date_debut_cdp || ct.modalites?.["_date_debut_cdp"] || "";
                                 const updatedCt = {...ct, modalites:newMod,
                                   planning_global_statut:"valide",
                                   date_debut_cdp: ct.date_debut_cdp || newMod["_date_debut_cdp"]};
@@ -4047,8 +4042,15 @@ export default function App() {
 
   // Upsert un seul objet dans une table Supabase
   const sbUpsert = (table, obj) => {
+    // Nettoyer les echeances avant sauvegarde (données calculées, pas besoin de les persister)
+    const toSave = table === "contrats" 
+      ? {...obj, echeances: undefined}  // echeances recalculées au chargement
+      : obj;
+    if(table==="contrats" && obj.planning_global_statut) {
+      console.log("[sbUpsert] contrat:", obj.id, "pgs:", obj.planning_global_statut, "ddc:", obj.date_debut_cdp);
+    }
     sb.from(table)
-      .upsert({ id: String(obj.id), data: obj }, { onConflict: "id" })
+      .upsert({ id: String(obj.id), data: toSave }, { onConflict: "id" })
       .then(({ error }) => { if (error) console.error(`${table} save:`, error, obj); });
   };
 
@@ -4157,11 +4159,8 @@ export default function App() {
         // (les données viennent déjà de la DB, inutile de les réécrire)
         _setContrats(!eCt && ct?.length ? ct.map(r => {
           const c = r.data ?? r;
-          // Restaurer planning_global_statut et date_debut_cdp depuis modalites (persistés en JSONB)
-          const mod = c.modalites || {};
-          const planning_global_statut = mod["_planning_global_statut"] || c.planning_global_statut || null;
-          const date_debut_cdp         = mod["_date_debut_cdp"]         || c.date_debut_cdp         || null;
-          const base = {...c, planning_global_statut, date_debut_cdp};
+          // planning_global_statut et date_debut_cdp sont à la racine de data
+          const base = {...c};
           return {...base, echeances: mkEcheances(base)};
         }) : []);
         _setClients( !eCl && cl?.length ? cl.map(r => r.data ?? r) : []);
